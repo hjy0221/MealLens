@@ -1,0 +1,63 @@
+{
+  "policy": "Keep each source namespaced until its license and label map are reviewed. Do not ship an image or model trained from a source whose redistribution rights are unresolved.",
+  "sources": [
+    {
+      "id": "aihub_korean_food_150",
+      "region": "Korea",
+      "url": "https://www.aihub.or.kr/aihubdata/data/view.do?currMenu=115&dataSetSn=79&topMenu=100",
+      "classes": 150,
+      "images": 150000,
+      "download_status": "downloaded_verified_local",
+      "rights_status": "use_conditions_must_be_retained",
+      "notes": "kfood.zip downloaded and verified locally; NIA attribution and restrictions on redistribution/export are part of the AI Hub conditions."
+    },
+    {
+      "id": "aihub_food_nutrition",
+      "region": "Korea and international",
+      "url": "https://www.aihub.or.kr/aihubdata/data/view.do?aihubDataSe=realm&currMenu=&dataSetSn=74&topMenu=",
+      "classes": 400,
+      "images": 842000,
+      "download_status": "application_required",
+      "rights_status": "review_conditions_before_use",
+      "notes": "Contains food images and nutrition text; do not infer that nutrition metadata applies to every photographed portion."
+    },
+    {
+      "id": "food101",
+      "region": "global",
+      "url": "https://data.vision.ee.ethz.ch/cvl/datasets_extra/food-101/",
+      "classes": 101,
+      "images": 101000,
+      "download_status": "prepared_and_evaluated_local_experiment",
+      "rights_status": "research_only_unless_image_rights_are_cleared",
+      "notes": "The source photos originate from Foodspotting and are not owned by ETHZ; negotiate rights for uses beyond scientific fair use."
+    },
+    {
+      "id": "uec_food256",
+      "region": "Japan and international",
+      "url": "http://foodcam.mobi/dataset256.html",
+      "classes": 256,
+      "download_status": "pending_terms_review",
+      "rights_status": "unresolved",
+      "notes": "Do not redistribute or ship a derived model until the current terms are verified."
+    },
+    {
+      "id": "chinesefoodnet",
+      "region": "China",
+      "url": "https://www.kaggle.com/datasets/yihfeng/chinesefoodnet/data",
+      "classes": 208,
+      "images": 185628,
+      "download_status": "pending_source_terms_review",
+      "rights_status": "academic_scope_to_be_verified",
+      "notes": "Kaggle metadata and the original distribution terms must agree before app use."
+    },
+    {
+      "id": "vireofood172",
+      "region": "China",
+      "url": "https://fvl.fudan.edu.cn/dataset/vireofood172/list.htm",
+      "classes": 172,
+      "download_status": "pending_author_procedure",
+      "rights_status": "permission_required_or_unclear",
+      "notes": "Follow the authors' access procedure and retain any research or commercial restrictions."
+    }
+  ]
+}
