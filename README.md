@@ -4,11 +4,13 @@
 
 ## 화면 미리보기
 
-![빈 대시보드](Previews/dashboard-empty.png)
-
-![식사 기록 대시보드](Previews/dashboard.png)
-
-![앱 아이콘](Previews/app-icon.png)
+<table>
+  <tr>
+    <td><img src="Previews/dashboard-empty.png" width="180" alt="빈 대시보드"></td>
+    <td><img src="Previews/dashboard.png" width="180" alt="식사 기록 대시보드"></td>
+    <td><img src="Previews/app-icon.png" width="180" alt="앱 아이콘"></td>
+  </tr>
+</table>
 
 ## 사용 방법
 
