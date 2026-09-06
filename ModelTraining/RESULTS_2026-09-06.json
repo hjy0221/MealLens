@@ -1,0 +1,50 @@
+{
+  "date": "2026-09-06",
+  "portion_run": "work/runs/nutrition5k-rgb-v1",
+  "training_dataset": "Nutrition5k overhead RGB",
+  "source": "https://github.com/google-research-datasets/Nutrition5k",
+  "split_counts": {"train": 2100, "validation": 654, "test": 506},
+  "exclusions": {"zero_calorie_labels": 2, "missing_rgb": 3},
+  "constant_baseline": {
+    "method": "Training-set median; not the old app's food-specific portions",
+    "grams": 180,
+    "calories": 206.959991,
+    "grams_mae": 115.41304347826087,
+    "calories_mae": 167.307240750988
+  },
+  "raw_rgb_test": {
+    "grams_mae": 50.10959712179185,
+    "grams_rmse": 74.07570676469511,
+    "grams_mape": 0.36249264930911385,
+    "calories_mae": 87.23085865940092,
+    "calories_rmse": 128.99219871238745,
+    "calories_mape": 0.47779528735571286
+  },
+  "app_preprocessing_test_on_macos": {
+    "count": 506,
+    "grams_mae": 52.89937510662661,
+    "calories_mae": 87.53575972335643,
+    "source_files": ["MealLens/PhotoPortionInference.swift", "MealLens/FoodClassifier.swift"]
+  },
+  "bundled_model_sha256": {
+    "PhotoGrams.mlmodel": "ba1d8b0ba604678d59fd0308904478b1ac4845e050ee0c3a8e67e16e8e0cf549",
+    "PhotoCalories.mlmodel": "bb580ec579ac2aba7684f84f342dc2483be17f4171ec602f914b38e883440ee6"
+  },
+  "expanded_classification": {
+    "classes": 251,
+    "train": 37646,
+    "validation": 7530,
+    "test": 6015,
+    "status": "training_failed_not_deployed",
+    "errors": ["CVPixelBufferPool creation failed, revision 2", "IOSurface creation failed, revision 1"],
+    "tested_mitigations": ["384px RGB 8-bit JPEG normalization", "ASCII class paths", "Scene Print revisions 1 and 2"],
+    "app_classifier": "Existing Food-101 101-class model unchanged"
+  },
+  "uec_food256": {"jpeg_files": 31395, "unique_filenames": 28897, "status": "downloaded_crc_verified_not_trained"},
+  "limitations": [
+    "No Korean or smartphone photo accuracy study",
+    "Whole-plate predictions, not per-food segmentation",
+    "Macros still use illustrative catalog values",
+    "Held-out dataset mean error is not an error bound for a user's photo"
+  ]
+}

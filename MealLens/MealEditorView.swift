@@ -19,11 +19,11 @@ struct MealEditorView: View {
     @State private var showCustom = false
     @State private var customFoodSeedName = ""
     @State private var pendingFood: Food?
-    @State private var showSoupChoices = false
     @State private var search = ""
     @State private var confirmed = false
     @State private var error: String?
     @State private var photoTask: Task<Void, Never>?
+    @State private var automaticItem: MealItem?
     private let classifier: any FoodClassifying = OnDeviceFoodClassifier()
 
     init(date: Date, existing: Meal? = nil) {
@@ -51,37 +51,17 @@ struct MealEditorView: View {
                     if photo != nil { Button("사진 제거", role: .destructive) { photo = nil; suggestions = []; selectedPhoto = nil; analysisStatus = "사진으로 음식 후보를 찾아보세요." }.disabled(busy) }
                     if busy { ProgressView("기기에서 분석 중…") }
                     Text(analysisStatus).font(.caption).foregroundStyle(.secondary)
-                    ForEach(suggestions) { suggestion in
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(suggestion.label).font(.headline)
-                            ForEach(suggestion.foods) { food in
-                                Button { pendingFood = food } label: {
-                                    Label("\(food.name) · 양을 선택하고 계산", systemImage: "plus.circle")
-                                }
-                            }
-                            if suggestion.needsNutritionEntry {
-                                Button {
-                                    customFoodSeedName = FoodLabelFormatter.displayName(suggestion.rawLabel)
-                                    showCustom = true
-                                } label: {
-                                    Label("이 후보를 선택하고 영양정보 입력", systemImage: "square.and.pencil")
-                                }
-                                Text("모델이 이름만 추정했어요. 중량과 100g 영양정보를 확인해 주세요.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }.padding(.vertical, 4)
-                    }
                     if photo != nil && !busy {
-                        Button("이 사진은 국·찌개예요 · 직접 선택") { showSoupChoices = true }
                         Button("사진 다시 분석") { if let photo { photoTask = Task { await analyze(photo) } } }
                     }
-                    Text("사진을 보고 음식 종류와 먹은 양을 추정해 칼로리를 자동 계산합니다. 추정 중량은 필요하면 수정할 수 있어요.").font(.caption).foregroundStyle(.secondary)
+                    Text("한 접시가 잘 보이도록 위에서 찍어주세요. 사진으로 접시 전체의 중량·열량을 추정하는 실험 기능이며, 국·찌개와 촬영 환경에 따라 오차가 클 수 있어요. 탄수화물·단백질·지방은 음식별 대표값으로 계산합니다.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("음식과 중량 확인") {
                     if items.isEmpty { Text("아래 목록에서 음식을 추가하세요.").foregroundStyle(.secondary) }
                     ForEach($items) { $item in
                         VStack(alignment: .leading, spacing: 8) {
                             TextField("음식 이름", text: $item.name)
+                            if let source = item.estimateSource { Text(source).font(.caption).foregroundStyle(.secondary) }
                             HStack {
                                 Text("중량 (g)")
                                 TextField("그램", value: $item.grams, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
@@ -112,7 +92,7 @@ struct MealEditorView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(items.isEmpty ? "음식과 양을 선택하면 계산됩니다" : "현재 합계 · \(total.calories.formatted(.number.precision(.fractionLength(0)))) kcal 추정")
                             .font(.subheadline.bold())
-                        Text("중량은 사진으로 추정한 값이며 필요하면 수정할 수 있어요").font(.caption).foregroundStyle(.secondary)
+                        Text("추정값은 수정할 수 있어요. 사진에 여러 음식이 있으면 전체 접시의 합계입니다.").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                 }.padding().frame(maxWidth: .infinity).background(.regularMaterial)
@@ -137,21 +117,6 @@ struct MealEditorView: View {
             }
             .sheet(isPresented: $showCamera) { CameraView { data in photoTask = Task { await analyze(data) } }.ignoresSafeArea() }
             .sheet(item: $pendingFood) { food in FoodPortionView(food: food) { items.append($0); confirmed = false } }
-            .sheet(isPresented: $showSoupChoices) {
-                NavigationStack {
-                    List {
-                        Section {
-                            ForEach(FoodCatalog.soups) { food in
-                                NavigationLink(food.name) {
-                                    FoodPortionView(food: food) { items.append($0); confirmed = false; showSoupChoices = false }
-                                }
-                            }
-                            Button("목록에 없어요 · 영양정보 직접 입력") { showSoupChoices = false; showCustom = true }
-                        } footer: { Text("국의 이름은 직접 선택해 주세요. 사진에서 세부 종류를 확정한 결과가 아닙니다.") }
-                    }.navigationTitle("국·찌개 종류")
-                        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("닫기") { showSoupChoices = false } } }
-                }
-            }
             .sheet(isPresented: $showCustom) {
                 CustomFoodView(initialName: customFoodSeedName) { items.append($0); confirmed = false }
             }
@@ -169,13 +134,14 @@ struct MealEditorView: View {
             let result = try await classifier.classify(prepared)
             try Task.checkCancellation()
             suggestions = result.suggestions
-            // Make photo-only use immediately useful: add the top model label
-            // as a 100g estimate. Users can still edit or replace it below.
-            if items.isEmpty {
+            // Replace only an untouched automatic estimate when reanalyzing.
+            // Preserve user edits and manually added items.
+            if items.isEmpty || (items.count == 1 && items.first == automaticItem) {
                 let label = suggestions.first?.rawLabel
-                let estimate = PhotoCalorieEstimator.estimate(label: label)
+                let estimate = PhotoCalorieEstimator.estimate(label: label, portion: result.portion)
                 items = [estimate]
-                confirmed = true
+                automaticItem = estimate
+                confirmed = false
                 let kcal = estimate.nutrients.calories.formatted(.number.precision(.fractionLength(0)))
                 let grams = estimate.grams.formatted(.number.precision(.fractionLength(0)))
                 analysisStatus = result.source + " · \(estimate.name) 약 \(grams)g · \(kcal) kcal로 자동 계산했어요."
@@ -255,7 +221,7 @@ struct FoodPortionView: View {
                             Button("300g") { grams = 300 }.buttonStyle(.bordered)
                             Button("450g") { grams = 450 }.buttonStyle(.bordered)
                         }
-                        Text("국물과 건더기를 합한 먹은 양입니다. 사진에서 추정한 값이며 필요하면 수정하세요.")
+                        Text("국물과 건더기를 합한 대표 1회량입니다. 먹은 양에 맞게 수정하세요.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }

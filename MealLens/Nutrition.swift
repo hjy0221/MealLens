@@ -44,14 +44,16 @@ enum FoodCatalog {
         Food(id: "kimchi_stew", name: "김치찌개", aliases: ["kimchi stew", "kimchi jjigae", "김치찌개"], per100g: .init(calories: 55, protein: 4, carbs: 3, fat: 3))
     ]
     static func match(_ label: String) -> Food? {
-        let normalized = label.lowercased().replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespaces)
-        return foods.first { $0.id == normalized || $0.aliases.contains(normalized) }
+        let normalized = FoodLabelFormatter.canonicalName(label)
+        return foods.first {
+            FoodLabelFormatter.canonicalName($0.id) == normalized ||
+            $0.aliases.contains { FoodLabelFormatter.canonicalName($0) == normalized }
+        }
     }
 }
 
-/// Converts a model food label into a usable photo-only estimate. The model
-/// identifies food type, while the serving size is a conservative 100g
-/// default because a single RGB photo cannot measure grams reliably.
+/// Converts food identity into a rough estimate using a representative serving.
+/// This fallback does not infer portion size from image pixels.
 enum PhotoCalorieEstimator {
     private static let values: [String: Nutrients] = [
         "apple pie": .init(calories: 237, protein: 2, carbs: 34, fat: 11),
@@ -78,8 +80,23 @@ enum PhotoCalorieEstimator {
         "waffles": .init(calories: 290, protein: 8, carbs: 33, fat: 14)
     ]
 
-    static func estimate(label: String?) -> MealItem {
+    static func estimate(label: String?, portion: PhotoPortionEstimate? = nil) -> MealItem {
+        var item = representativeEstimate(label: label)
+        if let portion, portion.isValid {
+            item.grams = portion.grams
+            item.per100g.calories = portion.calories / portion.grams * 100
+            item.estimateSource = "사진 기반 중량·열량 추정 · 실험"
+        } else {
+            item.estimateSource = "음식별 대표량으로 계산"
+        }
+        return item
+    }
+
+    private static func representativeEstimate(label: String?) -> MealItem {
         let original = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if let food = FoodCatalog.match(original) {
+            return MealItem(name: "\(food.name) · 추정", grams: food.suggestedGrams, per100g: food.per100g)
+        }
         let sourceFree = original.split(separator: "__", maxSplits: 1, omittingEmptySubsequences: true).last.map(String.init) ?? original
         let normalized = sourceFree.lowercased().replacingOccurrences(of: "_", with: " ")
         let nutrients = values[normalized] ?? fallback(for: normalized)
@@ -122,6 +139,7 @@ struct MealItem: Identifiable, Codable, Equatable {
     var name: String
     var grams: Double
     var per100g: Nutrients
+    var estimateSource: String? = nil
     var nutrients: Nutrients { per100g.scaled(by: grams / 100) }
     var isValid: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && grams.isFinite && grams > 0 && grams <= 5000 &&

@@ -28,22 +28,27 @@ struct FoodSuggestion: Identifiable, Sendable {
 struct ClassificationResult: Sendable {
     let suggestions: [FoodSuggestion]
     let source: String
+    var portion: PhotoPortionEstimate? = nil
 }
 protocol FoodClassifying: Sendable {
     func classify(_ photo: Data) async throws -> ClassificationResult
 }
 
 actor OnDeviceFoodClassifier: FoodClassifying {
+    private var portionInference: PhotoPortionInference?
     func classify(_ photo: Data) async throws -> ClassificationResult {
         try Task.checkCancellation()
         let handler = VNImageRequestHandler(data: photo)
         var observations: [VNClassificationObservation] = []
+        var labelMap: [String: String] = [:]
         var source = "Vision · 기기 내 분석"
         if let url = Bundle.main.url(forResource: "FoodClassifier", withExtension: "mlmodelc") {
             do {
                 let configuration = MLModelConfiguration()
                 configuration.computeUnits = .all
-                let model = try VNCoreMLModel(for: MLModel(contentsOf: url, configuration: configuration))
+                let coreModel = try MLModel(contentsOf: url, configuration: configuration)
+                let metadata = coreModel.modelDescription.metadata[.creatorDefinedKey] as? [String: String]
+                let model = try VNCoreMLModel(for: coreModel)
                 let request = VNCoreMLRequest(model: model)
                 request.imageCropAndScaleOption = .centerCrop
                 try handler.perform([request])
@@ -51,6 +56,9 @@ actor OnDeviceFoodClassifier: FoodClassifying {
                     throw CocoaError(.coderInvalidValue)
                 }
                 observations = results
+                if let json = metadata?["food_label_map"]?.data(using: .utf8) {
+                    labelMap = (try? JSONDecoder().decode([String: String].self, from: json)) ?? [:]
+                }
                 source = "Core ML · 기기 내 분석"
             } catch {
                 source = "모델을 사용할 수 없어 Vision으로 분석"
@@ -64,9 +72,12 @@ actor OnDeviceFoodClassifier: FoodClassifying {
             observations = request.results ?? []
         }
         try Task.checkCancellation()
+        if portionInference == nil { portionInference = try? PhotoPortionInference() }
+        let portion = try? portionInference?.estimate(photo)
+        try Task.checkCancellation()
         return ClassificationResult(suggestions: SuggestionResolver.resolve(observations.map {
-            ImageLabel(identifier: $0.identifier, confidence: $0.confidence)
-        }), source: source)
+            ImageLabel(identifier: labelMap[$0.identifier] ?? $0.identifier, confidence: $0.confidence)
+        }), source: source, portion: portion)
     }
 }
 
@@ -101,6 +112,11 @@ enum SuggestionResolver {
 }
 
 enum FoodLabelFormatter {
+    static func canonicalName(_ identifier: String) -> String {
+        let sourceFree = identifier.split(separator: "__", maxSplits: 1, omittingEmptySubsequences: true).last.map(String.init) ?? identifier
+        return sourceFree.precomposedStringWithCanonicalMapping.lowercased()
+            .replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
     private static let names: [String: String] = [
         "french_fries": "감자튀김", "ice_cream": "아이스크림", "pizza": "피자",
         "hamburger": "햄버거", "sushi": "초밥", "ramen": "라멘",

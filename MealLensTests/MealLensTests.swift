@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import UIKit
 @testable import MealLens
 
 final class MealLensTests: XCTestCase {
@@ -20,6 +21,18 @@ final class MealLensTests: XCTestCase {
         XCTAssertNil(FoodCatalog.match("food"))
         XCTAssertNil(FoodCatalog.match("pineapple"))
         XCTAssertNil(FoodCatalog.match("fried chicken"))
+    }
+    func testKoreanTrainingLabelUsesExistingSoupNutrition() throws {
+        // macOS folder labels may use decomposed Hangul; model labels also
+        // retain dataset prefixes. Both must resolve to the same food.
+        let label = "aihub_korea__미역국".decomposedStringWithCanonicalMapping
+        let suggestion = try XCTUnwrap(SuggestionResolver.resolve([ImageLabel(identifier: label, confidence: 0.9)]).first)
+        XCTAssertEqual(suggestion.foods.first?.id, "seaweed_soup")
+        let estimate = PhotoCalorieEstimator.estimate(label: label)
+        XCTAssertEqual(estimate.grams, 300)
+        XCTAssertEqual(estimate.nutrients.calories, 75)
+        XCTAssertEqual(FoodCatalog.match("food101__seaweed_soup")?.id, "seaweed_soup")
+        XCTAssertNil(FoodCatalog.match("aihub_korea__된장찌개"))
     }
     func testSoupLabelOffersRecipeChoicesWithoutInventingADish() throws {
         let suggestions = SuggestionResolver.resolve([ImageLabel(identifier: "soup", confidence: 0.8)])
@@ -56,6 +69,44 @@ final class MealLensTests: XCTestCase {
         let unknown = PhotoCalorieEstimator.estimate(label: nil)
         XCTAssertTrue(unknown.isValid)
         XCTAssertGreaterThan(unknown.nutrients.calories, 0)
+    }
+    func testPhotoPredictionReplacesRepresentativeMassAndEnergy() {
+        let item = PhotoCalorieEstimator.estimate(label: "food101__pizza", portion: .init(grams: 270, calories: 620))
+        XCTAssertEqual(item.grams, 270)
+        XCTAssertEqual(item.nutrients.calories, 620, accuracy: 0.001)
+        XCTAssertEqual(item.estimateSource, "사진 기반 중량·열량 추정 · 실험")
+        XCTAssertTrue(item.isValid)
+        for bad in [PhotoPortionEstimate(grams: .nan, calories: 500), .init(grams: 0, calories: 300), .init(grams: 10, calories: .infinity)] {
+            XCTAssertFalse(bad.isValid)
+            XCTAssertEqual(PhotoCalorieEstimator.estimate(label: "pizza", portion: bad).grams, 180)
+        }
+    }
+    func testBundledPortionModelsRunOnIOSAndRespondToImageContent() throws {
+        // This checks runtime compatibility, not real-food accuracy. Both
+        // fixtures are synthetic and contain no dataset images.
+        func photo(_ large: Bool) throws -> Data {
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            let renderer = UIGraphicsImageRenderer(size: CGSize(width: 384, height: 384), format: format)
+            return try XCTUnwrap(renderer.image { context in
+                UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 384, height: 384))
+                UIColor.brown.setFill()
+                context.cgContext.fillEllipse(in: large ? CGRect(x: 30,y: 30,width: 320,height: 320) : CGRect(x: 150,y: 150,width: 80,height: 80))
+                UIColor.green.setFill(); context.fill(CGRect(x: 50,y: 80,width: 40,height: 100))
+            }.jpegData(compressionQuality: 0.9))
+        }
+        let model = try PhotoPortionInference()
+        let small = try model.estimate(PhotoPreparation.prepare(photo(false)))
+        let large = try model.estimate(PhotoPreparation.prepare(photo(true)))
+        XCTAssertTrue(small.isValid); XCTAssertTrue(large.isValid)
+        XCTAssertGreaterThan(abs(small.grams - large.grams) + abs(small.calories - large.calories), 0.01)
+    }
+    func testMealItemsSavedBeforeEstimateSourceStillDecode() throws {
+        let old = MealItem(food: FoodCatalog.foods[0])
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as? [String: Any])
+        json.removeValue(forKey: "estimateSource")
+        let decoded = try JSONDecoder().decode(MealItem.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(decoded.estimateSource)
+        XCTAssertEqual(decoded.nutrients.calories, old.nutrients.calories)
     }
     func testSoupPortionCalculationAfterUserChoice() throws {
         let food = try XCTUnwrap(FoodCatalog.foods.first { $0.id == "seaweed_soup" })

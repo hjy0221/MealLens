@@ -60,6 +60,12 @@ struct DashboardView: View {
                     Text("사진은 기기 내에서 분석하고 식사 기록은 이 기기에 저장해요. 음식 종류·조리법·중량에 따라 실제 영양값은 달라집니다. 기본 식품값은 MVP 예시이며 의료 또는 식이 처방용이 아닙니다.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Text("활동 에너지는 하루 총 소모량이 아니며, 섭취량에서 차감하지 않습니다.").font(.footnote).foregroundStyle(.secondary)
+                    DisclosureGroup("사진 추정 모델 안내") {
+                        Text("중량·열량은 접시 전체를 예측하는 실험 모델입니다. 미국 구내식당 사진으로 학습했으며, 한식·국물·스마트폰 촬영 환경의 오차는 아직 검증하지 않았어요.").font(.footnote)
+                        Text("데이터: Nutrition5k · Google Research / Thames 외, CVPR 2021. MealLens에서 사진 특징 추출과 중량·열량 회귀 학습을 수행했습니다.").font(.caption)
+                        Link("Nutrition5k 원본과 연구", destination: URL(string: "https://github.com/google-research-datasets/Nutrition5k")!)
+                        Link("데이터 이용 조건 · CC BY 4.0", destination: URL(string: "https://creativecommons.org/licenses/by/4.0/")!)
+                    }
                 }
             }
             .navigationTitle("오늘의 한 끼")

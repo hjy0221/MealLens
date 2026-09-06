@@ -29,6 +29,7 @@ func validate(_ dataset: URL) throws -> [String: [URL]] {
         if let expectedLabels, expectedLabels != labels { try fail("Class labels differ between dataset splits.") }
         expectedLabels = labels
         for photo in photos {
+            try autoreleasepool {
             guard photo.deletingLastPathComponent().deletingLastPathComponent() == root else {
                 try fail("Expected split/class/image, got \(photo.path)")
             }
@@ -39,6 +40,7 @@ func validate(_ dataset: URL) throws -> [String: [URL]] {
                   CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 128] as CFDictionary) != nil else {
                 try fail("Unreadable image: \(photo.path)")
             }
+            }
         }
         bySplit[split] = photos
         print("Validated \(split): \(photos.count) images, \(labels.count) classes")
@@ -48,7 +50,9 @@ func validate(_ dataset: URL) throws -> [String: [URL]] {
 
 func run() throws {
     let args = CommandLine.arguments
-    guard args.count == 3 else { try fail("Usage: TrainFoodClassifier <prepared-dataset> <new-run-output-directory>") }
+    guard (3...4).contains(args.count) else { try fail("Usage: TrainFoodClassifier <prepared-dataset> <new-run-output-directory> [scene-print-revision]") }
+    let revision = args.count == 4 ? Int(args[3]) ?? 2 : 2
+    guard [1, 2].contains(revision) else { try fail("Unsupported feature revision") }
     let dataset = URL(fileURLWithPath: args[1]).standardizedFileURL
     let output = URL(fileURLWithPath: args[2]).standardizedFileURL
     guard !fm.fileExists(atPath: output.path) else { try fail("Choose a new run directory; previous runs are preserved.") }
@@ -56,21 +60,23 @@ func run() throws {
     try fm.createDirectory(at: output, withIntermediateDirectories: true)
     let parameters = MLImageClassifier.ModelParameters(
         validation: .dataSource(.labeledDirectories(at: dataset.appendingPathComponent("validation"))),
-        // Keep the first local run memory-stable on large multi-cuisine sets.
-        // Augmentation can be enabled for a later run after the baseline is
-        // evaluated; Create ML's pixel-buffer pool is sensitive to mixed
-        // source dimensions during augmented training.
+        // Decode validation images in individual autorelease pools. Large
+        // runs previously retained temporary image buffers until training.
+        // Use normalized images and record augmentation explicitly per run.
         maxIterations: 35,
-        augmentation: [.flip],
-        algorithm: .transferLearning(featureExtractor: .scenePrint(revision: 2), classifier: .logisticRegressor)
+        augmentation: [],
+        algorithm: .transferLearning(featureExtractor: .scenePrint(revision: revision), classifier: .logisticRegressor)
     )
     print("Training Create ML image classifier locally…")
     let started = Date()
     let classifier = try MLImageClassifier(trainingData: .labeledDirectories(at: dataset.appendingPathComponent("train")), parameters: parameters)
     let testMetrics = classifier.evaluation(on: .labeledDirectories(at: dataset.appendingPathComponent("test")))
     guard testMetrics.isValid, classifier.validationMetrics.isValid else { try fail("Evaluation failed. No model exported.") }
+    var additional = ["training_framework": "Create ML", "preprocessing": "Vision centerCrop", "dataset_manifest": "manifest.json", "scene_print_revision": String(revision)]
+    let labelMap = dataset.appendingPathComponent("class-labels.json")
+    if fm.fileExists(atPath: labelMap.path) { additional["food_label_map"] = try String(contentsOf: labelMap, encoding: .utf8) }
     let metadata = MLModelMetadata(author: "MealLens", shortDescription: "Experimental food identity classifier. Does not estimate portion weight or nutrients.",
-                                   version: "0.1", additional: ["training_framework": "Create ML", "preprocessing": "Vision centerCrop", "dataset_manifest": "manifest.json"])
+                                   version: "0.2", additional: additional)
     let modelURL = output.appendingPathComponent("FoodClassifier.mlmodel")
     try classifier.write(to: modelURL, metadata: metadata)
     // Evaluate the exported model through the SAME Vision request used in the iOS app.
@@ -81,6 +87,7 @@ func run() throws {
     var confusion: [String: [String: Int]] = [:]
     var predictions: [[String: Any]] = []
     for photo in photos["test"]! {
+        try autoreleasepool {
         let expected = photo.deletingLastPathComponent().lastPathComponent
         let request = VNCoreMLRequest(model: visionModel)
         request.imageCropAndScaleOption = .centerCrop
@@ -91,6 +98,7 @@ func run() throws {
         confusion[expected, default: [:]][first.identifier, default: 0] += 1
         predictions.append(["image": photo.lastPathComponent, "expected": expected,
                             "top3": observations.prefix(3).map { ["label": $0.identifier, "score": $0.confidence] as [String: Any] }])
+        }
     }
     let count = photos["test"]!.count
     let report: [String: Any] = ["status": "experimental_evaluated_not_deployed", "training_seconds": Date().timeIntervalSince(started),

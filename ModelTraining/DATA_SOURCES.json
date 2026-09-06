@@ -36,9 +36,26 @@
       "region": "Japan and international",
       "url": "http://foodcam.mobi/dataset256.html",
       "classes": 256,
-      "download_status": "pending_terms_review",
-      "rights_status": "unresolved",
-      "notes": "Do not redistribute or ship a derived model until the current terms are verified."
+      "download_status": "downloaded_crc_verified_extracted",
+      "image_files": 31395,
+      "unique_filenames": 28897,
+      "training_status": "not_yet_trained",
+      "rights_status": "noncommercial_research_only",
+      "notes": "256 bounding-box files retained. Mixed-food photos repeat across categories; split by original image group before cropping. No UEC-trained model is bundled."
+    },
+    {
+      "id": "nutrition5k",
+      "region": "California US cafeterias",
+      "url": "https://github.com/google-research-datasets/Nutrition5k",
+      "rgb_images": 3490,
+      "download_status": "3501_objects_size_and_md5_verified",
+      "download_bytes": 1456763439,
+      "rights_status": "CC_BY_4.0_attribution_retained",
+      "training_status": "photo_mass_and_calories_regressors_trained",
+      "train_images": 2100,
+      "validation_images": 654,
+      "test_images": 506,
+      "notes": "Official depth train/test split retained; training capture days separate validation. Two zero-calorie labels and three missing RGB images excluded. Smartphone and Korean food generalization unmeasured."
     },
     {
       "id": "chinesefoodnet",
