@@ -6,7 +6,7 @@
 
 <table>
   <tr>
-    <td><img src="Previews/dashboard-empty.png" width="180" alt="빈 대시보드"></td>
+    <td><img src="Previews/meal-detail-sashimi.png" width="180" alt="생선회 식사 상세"></td>
     <td><img src="Previews/dashboard.png" width="180" alt="식사 기록 대시보드"></td>
     <td><img src="Previews/app-icon.png" width="180" alt="앱 아이콘"></td>
   </tr>
