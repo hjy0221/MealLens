@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>한 끼</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>ko</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +17,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>2</string>
+	<string>4</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>

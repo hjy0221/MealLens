@@ -44,7 +44,15 @@ work/train-food work/expanded-ascii work/runs/new-classifier 2
 
 음식당 학습 최대 150장, 검증 30장, 시험 한식 30장/Food-101 기존 15장입니다. 정규화 후 동일 사진 4장을 추가 제외해 train 37,646 / validation 7,530 / test 6,015장이 됩니다. JPEG 384px, 품질 0.9, EXIF 방향 적용을 사용합니다. ASCII 경로 매핑은 모델 metadata의 `food_label_map`으로 복원하며 앱도 이를 읽습니다.
 
-이번 Mac 실행은 revision 2에서 `CVPixelBufferPool`, revision 1에서 `IOSurface` 오류로 멈췄습니다. RGB 8비트 검사와 한글 경로 제거로 해결되지 않았으므로 특정 경로나 메모리를 확정 원인으로 간주하지 않습니다. 실패한 분류 모델을 앱에 덮어쓰지 않습니다. 한식 원본에는 촬영 세션 정보가 없어 비슷한 연속 사진의 누출 가능성은 별도로 남아 있습니다.
+위 MLImageClassifier 경로는 revision 2에서 `CVPixelBufferPool`, revision 1에서 `IOSurface` 오류로 멈췄습니다. 2026-09-07에는 사진별 Vision 특징 추출과 DataFrame 분류 학습으로 251종 모델을 완성했습니다. 기존 모델을 실패 시 사용할 수 있게 남겨 두고 새 모델을 우선 사용합니다. 한식 원본에는 촬영 세션 정보가 없어 비슷한 연속 사진의 누출 가능성은 별도로 남아 있습니다.
+
+```sh
+xcrun swiftc -O MealLens/FoodClassifier.swift MealLens/Nutrition.swift \
+  MealLens/PhotoPortionInference.swift ModelTraining/TrainFeatureClassifier.swift -o work/train-feature-classifier
+work/train-feature-classifier work/expanded-ascii work/runs/new-feature-classifier
+```
+
+완료된 모델 파일은 `FoodIdentity.mlmodel`이며 class-labels 매핑이 metadata에 포함됩니다. 전처리·분할을 바꾸는 경우 기존 특징 캐시를 재사용하지 마세요. 비교 도구 `EvaluateIdentityModels.swift`는 같은 입력에서 두 모델의 세부 라벨 정답률을 비교합니다. `CompareMealPhotos.swift`는 로컬 재현 검사 전용이며 개인 사진을 저장소에 추가하지 않습니다.
 
 일반 출처 병합·촬영 그룹 분할은 기존 `merge_global_sources.py`, `prepare_dataset.py`를 사용합니다. 도구 검사:
 

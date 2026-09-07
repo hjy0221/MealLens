@@ -1,9 +1,96 @@
 import XCTest
 import SwiftData
 import UIKit
+import CoreML
 @testable import MealLens
 
 final class MealLensTests: XCTestCase {
+    func testNewClassifierCoversKoreanFoodsAndValidatesFeatureShape() throws {
+        let url = try XCTUnwrap(Bundle.main.url(forResource: "FoodIdentity", withExtension: "mlmodelc"))
+        let model = try FoodIdentityInference(modelURL: url)
+        XCTAssertEqual(model.labels.count, 251)
+        XCTAssertTrue(model.labels.contains("aihub_korea__떡볶이"))
+        XCTAssertTrue(model.labels.contains("aihub_korea__새우튀김"))
+        XCTAssertTrue(model.labels.allSatisfy { FoodLabelFormatter.displayName($0) != "음식" })
+        XCTAssertThrowsError(try model.classify(features: [0, 1]))
+        let scores = try model.classify(features: Array(repeating: 0, count: 768))
+        XCTAssertEqual(scores.count, 251)
+        XCTAssertEqual(scores.reduce(0.0) { $0 + Double($1.confidence) }, 1, accuracy: 0.0001)
+    }
+
+    func testNewClassifierRunsThroughTheAppPipeline() async throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 384, height: 384)).image { context in
+            UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 384, height: 384))
+            UIColor.brown.setFill(); context.cgContext.fillEllipse(in: CGRect(x: 60, y: 60, width: 250, height: 250))
+        }
+        let data = try PhotoPreparation.prepare(XCTUnwrap(image.jpegData(compressionQuality: 0.8)))
+        let result = try await OnDeviceFoodClassifier().classify(data)
+        XCTAssertEqual(result.source, "Core ML · 한식 포함 기기 내 분석")
+    }
+    func testPhotoNamesDoNotAssertSaladOrFritterIngredients() {
+        for label in ["food101__seaweed_salad", "food101__caesar_salad"] {
+            let item = PhotoCalorieEstimator.estimate(label: label, portion: .init(grams: 140, calories: 110))
+            XCTAssertTrue(item.name.hasPrefix("샐러드 ·"))
+            XCTAssertEqual(item.calories, 110, accuracy: 0.001)
+        }
+        for label in ["food101__onion_rings", "aihub_korea__새우튀김", "tempura"] {
+            XCTAssertTrue(PhotoCalorieEstimator.estimate(label: label).name.hasPrefix("튀김류 ·"))
+        }
+        XCTAssertTrue(PhotoCalorieEstimator.estimate(label: "pizza").name.hasPrefix("피자 ·"))
+        // Manual naming and the underlying class translation keep their specificity.
+        XCTAssertEqual(FoodLabelFormatter.displayName("food101__onion_rings"), "어니언 링")
+    }
+    func testAllBundledFoodLabelsHaveKoreanNames() throws {
+        let url = try XCTUnwrap(Bundle.main.url(forResource: "FoodClassifier", withExtension: "mlmodelc"))
+        let model = try MLModel(contentsOf: url)
+        let labels = try XCTUnwrap(model.modelDescription.classLabels as? [String])
+        XCTAssertEqual(labels.count, 101)
+        for label in labels {
+            let name = FoodLabelFormatter.displayName(label)
+            XCTAssertNotEqual(name, "음식", label)
+            XCTAssertNotNil(name.range(of: "[가-힣]", options: .regularExpression), label)
+        }
+        XCTAssertEqual(FoodLabelFormatter.storedName("bibimbap · 사진 기반 추정"), "비빔밥 · 사진 기반 추정")
+        XCTAssertEqual(FoodLabelFormatter.storedName("엄마가 만든 점심"), "엄마가 만든 점심")
+    }
+
+    func testEditedCaloriesPersistAndScaleWithWeight() throws {
+        var item = MealItem(food: FoodCatalog.foods[0], grams: 200)
+        item.name = "내 볶음밥"
+        item.calories = 420
+        XCTAssertEqual(item.calories, 420, accuracy: 0.001)
+        item.grams = 100
+        XCTAssertEqual(item.calories, 210, accuracy: 0.001)
+        let restored = try JSONDecoder().decode(MealItem.self, from: JSONEncoder().encode(item))
+        XCTAssertEqual(restored.name, "내 볶음밥")
+        XCTAssertEqual(restored.calories, 210, accuracy: 0.001)
+        item.calories = -1
+        XCTAssertFalse(item.isValid)
+    }
+
+    @MainActor func testPhotoBackupRestoreAndStoreReopen() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("records.store")
+        let config = ModelConfiguration(url: url, cloudKitDatabase: .none)
+        let container = try ModelContainer(for: Meal.self, configurations: config)
+        let context = ModelContext(container)
+        let photo = Data(repeating: 0xAB, count: 256 * 1024)
+        var item = MealItem(food: FoodCatalog.foods[0], grams: 250)
+        item.calories = 430
+        let meal = Meal(date: Date(), title: "사진이 있는 식사", items: [item], photo: photo)
+        let archive = try JSONEncoder().encode(MealArchive(meals: [meal]))
+        XCTAssertEqual(try MealArchive.restore(archive, into: context), 1)
+        XCTAssertEqual(try MealArchive.restore(archive, into: context), 0)
+        let reopened = try ModelContainer(for: Meal.self, configurations: config)
+        let saved = try XCTUnwrap(ModelContext(reopened).fetch(FetchDescriptor<Meal>()).first)
+        XCTAssertEqual(saved.photo, photo)
+        XCTAssertEqual(saved.id, meal.id)
+        XCTAssertEqual(saved.items[0].calories, 430, accuracy: 0.001)
+        XCTAssertThrowsError(try MealArchive.restore(Data("{}".utf8), into: context))
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Meal>()), 1)
+    }
     func testPortionScalingAndMixedMeal() {
         let rice = MealItem(food: FoodCatalog.foods[0], grams: 200)
         let chicken = MealItem(food: FoodCatalog.foods[1], grams: 150)

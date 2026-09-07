@@ -30,7 +30,9 @@ struct MealEditorView: View {
         self.existing = existing
         _date = State(initialValue: existing?.date ?? date)
         _title = State(initialValue: existing?.title ?? "식사")
-        _items = State(initialValue: existing?.items ?? [])
+        _items = State(initialValue: (existing?.items ?? []).map { item in
+            var localized = item; localized.name = FoodLabelFormatter.storedName(item.name); return localized
+        })
         _photo = State(initialValue: existing?.photo)
     }
     private var total: Nutrients { items.reduce(Nutrients()) { $0 + $1.nutrients } }
@@ -52,11 +54,13 @@ struct MealEditorView: View {
                     if busy { ProgressView("기기에서 분석 중…") }
                     Text(analysisStatus).font(.caption).foregroundStyle(.secondary)
                     if photo != nil && !busy {
-                        Button("사진 다시 분석") { if let photo { photoTask = Task { await analyze(photo) } } }
+                        Button("사진 다시 분석") { if let photo { photoTask = Task { await analyze(photo, replaceItems: true) } } }
+                        Text("다시 분석하면 편집 중인 음식·중량·칼로리를 새 추정값으로 바꿉니다. 저장해야 기록에 반영됩니다.").font(.caption).foregroundStyle(.secondary)
                     }
                     Text("한 접시가 잘 보이도록 위에서 찍어주세요. 사진으로 접시 전체의 중량·열량을 추정하는 실험 기능이며, 국·찌개와 촬영 환경에 따라 오차가 클 수 있어요. 탄수화물·단백질·지방은 음식별 대표값으로 계산합니다.").font(.caption).foregroundStyle(.secondary)
+                    Text("샐러드·튀김류는 큰 분류로 표시합니다. 사진 전체의 예측이므로 여러 음식을 각각 구분한 결과는 아닙니다.").font(.caption).foregroundStyle(.secondary)
                 }
-                Section("음식과 중량 확인") {
+                Section("음식 이름·중량·칼로리 수정") {
                     if items.isEmpty { Text("아래 목록에서 음식을 추가하세요.").foregroundStyle(.secondary) }
                     ForEach($items) { $item in
                         VStack(alignment: .leading, spacing: 8) {
@@ -66,10 +70,17 @@ struct MealEditorView: View {
                                 Text("중량 (g)")
                                 TextField("그램", value: $item.grams, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
                             }
+                            HStack {
+                                Text("칼로리 (kcal)")
+                                TextField("먹은 양의 칼로리", value: $item.calories, format: .number)
+                                    .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                                    .disabled(!item.grams.isFinite || item.grams <= 0)
+                            }
                             if item.isValid { Text("\(item.nutrients.calories, specifier: "%.0f") kcal 추정").font(.caption).foregroundStyle(.secondary) }
-                            else { Text("중량은 0보다 크고 5,000g 이하여야 합니다.").font(.caption).foregroundStyle(.red) }
+                            else { Text("중량은 0보다 크고 5,000g 이하, 칼로리는 0 이상이어야 해요. 100g당 1,000kcal 이하로 입력해 주세요.").font(.caption).foregroundStyle(.red) }
                         }
                     }.onDelete { items.remove(atOffsets: $0); confirmed = false }
+                    Text("칼로리는 먹은 양 전체의 값입니다. 중량을 바꾸면 칼로리도 같은 비율로 바뀝니다.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("음식 추가 · 예시 식품값") {
                     TextField("음식 검색", text: $search)
@@ -124,7 +135,7 @@ struct MealEditorView: View {
             .alert("안내", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("확인") { error = nil } } message: { Text(error ?? "") }
         }
     }
-    @MainActor private func analyze(_ data: Data) async {
+    @MainActor private func analyze(_ data: Data, replaceItems: Bool = false) async {
         busy = true; suggestions = []; confirmed = false
         defer { busy = false }
         do {
@@ -134,9 +145,9 @@ struct MealEditorView: View {
             let result = try await classifier.classify(prepared)
             try Task.checkCancellation()
             suggestions = result.suggestions
-            // Replace only an untouched automatic estimate when reanalyzing.
-            // Preserve user edits and manually added items.
-            if items.isEmpty || (items.count == 1 && items.first == automaticItem) {
+            // Explicit reanalysis replaces the draft; saving commits it to the meal.
+            // Otherwise preserve user edits and manually added items.
+            if replaceItems || items.isEmpty || (items.count == 1 && items.first == automaticItem) {
                 let label = suggestions.first?.rawLabel
                 let estimate = PhotoCalorieEstimator.estimate(label: label, portion: result.portion)
                 items = [estimate]
@@ -146,7 +157,7 @@ struct MealEditorView: View {
                 let grams = estimate.grams.formatted(.number.precision(.fractionLength(0)))
                 analysisStatus = result.source + " · \(estimate.name) 약 \(grams)g · \(kcal) kcal로 자동 계산했어요."
             } else {
-                analysisStatus = result.source + (suggestions.isEmpty ? " · 기존 음식 항목을 유지했어요." : " · 후보를 확인하거나 기존 항목을 수정하세요.")
+                analysisStatus = result.source + " · 기존 음식 항목을 유지했어요. 음식 이름과 양을 수정할 수 있어요."
             }
         } catch is CancellationError { }
         catch { analysisStatus = "사진 분석에 실패했어요. 다시 사진을 선택하거나 직접 음식을 추가하세요." }

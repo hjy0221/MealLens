@@ -81,7 +81,7 @@ enum PhotoCalorieEstimator {
     ]
 
     static func estimate(label: String?, portion: PhotoPortionEstimate? = nil) -> MealItem {
-        var item = representativeEstimate(label: label)
+        var item = representativeEstimate(label: FoodLabelFormatter.photoLabel(label))
         if let portion, portion.isValid {
             item.grams = portion.grams
             item.per100g.calories = portion.calories / portion.grams * 100
@@ -141,6 +141,13 @@ struct MealItem: Identifiable, Codable, Equatable {
     var per100g: Nutrients
     var estimateSource: String? = nil
     var nutrients: Nutrients { per100g.scaled(by: grams / 100) }
+    var calories: Double {
+        get { nutrients.calories }
+        set {
+            guard grams.isFinite, grams > 0 else { return }
+            per100g.calories = newValue * 100 / grams
+        }
+    }
     var isValid: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && grams.isFinite && grams > 0 && grams <= 5000 &&
         [per100g.calories, per100g.protein, per100g.carbs, per100g.fat].allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 1000 }
@@ -166,4 +173,41 @@ enum DailySummary {
         meals.filter { calendar.isDate($0.date, inSameDayAs: date) }
     }
     static func total(_ meals: [Meal]) -> Nutrients { meals.reduce(Nutrients()) { $0 + $1.total } }
+}
+
+struct MealArchive: Codable {
+    struct Entry: Codable {
+        let id: UUID
+        let date: Date
+        let title: String
+        let items: [MealItem]
+        let photo: Data?
+    }
+    let version: Int
+    let entries: [Entry]
+
+    init(meals: [Meal]) {
+        version = 1
+        entries = meals.map { Entry(id: $0.id, date: $0.date, title: $0.title, items: $0.items, photo: $0.photo) }
+    }
+
+    @MainActor static func restore(_ data: Data, into context: ModelContext) throws -> Int {
+        let archive = try JSONDecoder().decode(Self.self, from: data)
+        guard archive.version == 1, Set(archive.entries.map(\.id)).count == archive.entries.count,
+              archive.entries.allSatisfy({ !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                  $0.date.timeIntervalSince1970.isFinite && !$0.items.isEmpty && $0.items.allSatisfy(\.isValid) }) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let existing = Set(try context.fetch(FetchDescriptor<Meal>()).map(\.id))
+        let missing = archive.entries.filter { !existing.contains($0.id) }
+        do {
+            for entry in missing {
+                let meal = Meal(date: entry.date, title: entry.title, items: entry.items, photo: entry.photo)
+                meal.id = entry.id
+                context.insert(meal)
+            }
+            try context.save()
+        } catch { context.rollback(); throw error }
+        return missing.count
+    }
 }

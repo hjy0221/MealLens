@@ -2,6 +2,7 @@ import Foundation
 import CreateML
 import CoreML
 import CryptoKit
+import TabularData
 
 // Bypass MLImageClassifier's failing bulk image loader. Extract Vision
 // features one image at a time and train the classifier on numeric columns.
@@ -44,14 +45,13 @@ import CryptoKit
         let groups = Dictionary(grouping: samples, by: { $0.record.split })
         let train = groups["train"]!, validation = groups["validation"]!, test = groups["test"]!
         let columns = (0..<768).map { "f\($0)" }
-        func table(_ rows: [Sample]) -> MLDataTable {
-            var table = MLDataTable()
-            for i in 0..<768 { table.addColumn(MLDataColumn(rows.map { Double($0.features[i]) }), named: columns[i]) }
-            table.addColumn(MLDataColumn(rows.map { $0.record.label }), named: "food")
-            return table
+        func table(_ rows: [Sample]) -> DataFrame {
+            var data = (0..<768).map { i in Column(name: columns[i], contents: rows.map { Double($0.features[i]) }).eraseToAnyColumn() }
+            data.append(Column(name: "food", contents: rows.map { $0.record.label }).eraseToAnyColumn())
+            return DataFrame(columns: data)
         }
         print("Training \(Set(records.map(\.label)).count) classes: \(train.count) train / \(validation.count) validation / \(test.count) test"); fflush(stdout)
-        let parameters = MLLogisticRegressionClassifier.ModelParameters(validation: .table(table(validation)),
+        let parameters = MLLogisticRegressionClassifier.ModelParameters(validation: .dataFrame(table(validation)),
             maxIterations: 50, l2Penalty: 0.01, convergenceThreshold: 0.001, featureRescaling: true)
         let classifier = try MLLogisticRegressionClassifier(trainingData: table(train), targetColumn: "food", featureColumns: columns, parameters: parameters)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
