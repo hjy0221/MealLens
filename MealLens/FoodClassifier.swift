@@ -5,17 +5,21 @@ import ImageIO
 import UniformTypeIdentifiers
 
 struct FoodSuggestion: Identifiable, Sendable {
+    static let soupChoicesID = "soup_choices"
+
     let id: String
     let label: String
     let confidence: Float
     let rawLabel: String
     private let matchedFoodID: String?
+
     var foods: [Food] {
-        if id == "soup_choices" { return FoodCatalog.soups }
+        if id == Self.soupChoicesID { return FoodCatalog.soups }
         guard let matchedFoodID else { return [] }
         return FoodCatalog.foods.filter { $0.id == matchedFoodID }
     }
-    var needsNutritionEntry: Bool { id != "soup_choices" && matchedFoodID == nil }
+
+    var needsNutritionEntry: Bool { id != Self.soupChoicesID && matchedFoodID == nil }
 
     init(id: String, label: String, confidence: Float, rawLabel: String = "", matchedFoodID: String? = nil) {
         self.id = id
@@ -25,37 +29,102 @@ struct FoodSuggestion: Identifiable, Sendable {
         self.matchedFoodID = matchedFoodID
     }
 }
+
 struct ClassificationResult: Sendable {
     let suggestions: [FoodSuggestion]
     let source: String
     var portion: PhotoPortionEstimate? = nil
+    var regions: [ClassifiedFoodRegion] = []
+
+    var estimatedItems: [MealItem] {
+        guard regions.count > 1 else {
+            return [PhotoCalorieEstimator.estimate(label: suggestions.first?.rawLabel, portion: portion)]
+        }
+        return RegionPortionAllocator.items(regions: regions, wholePlate: portion)
+    }
 }
+
 protocol FoodClassifying: Sendable {
     func classify(_ photo: Data) async throws -> ClassificationResult
 }
 
 actor OnDeviceFoodClassifier: FoodClassifying {
+    // The detector is intentionally broad and can outline empty plates or
+    // bowls. Require a meaningful crop classification before creating a meal
+    // item; otherwise an empty vessel becomes a false food entry.
+    private static let regionConfidenceThreshold: Float = 0.45
+    private static let identitySource = "Core ML · 한식 포함 기기 내 분석"
+    private static let regionSource = "Core ML · 음식별 영역 분석"
+    private static let bundledSource = "Core ML · 기기 내 분석"
+    private static let visionSource = "Vision · 기기 내 분석"
+    private static let bundledFallbackSource = "모델을 사용할 수 없어 Vision으로 분석"
+
     private var portionInference: PhotoPortionInference?
     private var identityInference: FoodIdentityInference?
+    private var broadIdentityInference: FoodIdentityInference?
+    private let detectorURL: URL?
+
+    init(detectorURL: URL? = Bundle.main.url(forResource: "FoodDetector", withExtension: "mlmodelc")) {
+        self.detectorURL = detectorURL
+    }
+
     func classify(_ photo: Data) async throws -> ClassificationResult {
+        var whole = try await classifyWhole(photo)
+        // Only activate with a validated, explicitly supplied food detector.
+        // Saliency finds objects, but cannot establish that each is food.
+        guard let detectorURL else { return whole }
+        do {
+            let regions = try FoodRegionDetector(modelURL: detectorURL).detect(photo)
+            guard regions.count > 1 else { return whole }
+            var classified: [ClassifiedFoodRegion] = []
+            for region in regions {
+                try Task.checkCancellation()
+                let crop = try FoodRegionDetector.crop(photo, box: region.box)
+                let result = try await classifyWhole(crop, includePortion: false)
+                // Keep uncertain detected foods instead of silently dropping
+                // them and distributing their mass to confident predictions.
+                let suggestion = result.suggestions.first
+                guard let suggestion,
+                      suggestion.confidence >= Self.regionConfidenceThreshold else { continue }
+                classified.append(ClassifiedFoodRegion(box: region.box, label: suggestion.rawLabel))
+            }
+            // A detector may find bowls but no actual food. Keep the whole
+            // photo estimate in that case instead of presenting empty items.
+            guard classified.count > 1 else { return whole }
+            whole.regions = classified
+            whole = ClassificationResult(suggestions: whole.suggestions,
+                source: Self.regionSource, portion: whole.portion, regions: classified)
+        } catch is CancellationError { throw CancellationError() }
+        catch { /* Detection failure keeps the existing whole-photo estimate. */ }
+        return whole
+    }
+
+    private func classifyWhole(_ photo: Data, includePortion: Bool = true) async throws -> ClassificationResult {
         try Task.checkCancellation()
         if let url = Bundle.main.url(forResource: "FoodIdentity", withExtension: "mlmodelc") {
             do {
-                if identityInference == nil { identityInference = try FoodIdentityInference(modelURL: url) }
+                let identityInference = try cachedIdentityInference(modelURL: url)
                 let features = try PhotoFeatures.extract(photo)
-                let labels = try identityInference!.classify(features: features)
-                if portionInference == nil { portionInference = try? PhotoPortionInference() }
-                let portion = try? portionInference?.estimate(features: features)
+                let detailedLabels = try identityInference.classify(features: features)
+                let labels: [ImageLabel]
+                if let broadURL = Bundle.main.url(forResource: "FoodBroadIdentity", withExtension: "mlmodelc"),
+                   let broadLabels = try? cachedBroadIdentityInference(modelURL: broadURL).classify(features: features) {
+                    labels = BroadFoodReconciler.reconcile(detailed: detailedLabels, broad: broadLabels)
+                } else {
+                    labels = detailedLabels
+                }
+                if includePortion && portionInference == nil { portionInference = try? PhotoPortionInference() }
+                let portion = includePortion ? try? portionInference?.estimate(features: features) : nil
                 try Task.checkCancellation()
                 return ClassificationResult(suggestions: SuggestionResolver.resolve(labels),
-                    source: "Core ML · 한식 포함 기기 내 분석", portion: portion)
+                    source: Self.identitySource, portion: portion)
             } catch is CancellationError { throw CancellationError() }
             catch { /* The original bundled image model remains a fallback. */ }
         }
         let handler = VNImageRequestHandler(data: photo)
         var observations: [VNClassificationObservation] = []
         var labelMap: [String: String] = [:]
-        var source = "Vision · 기기 내 분석"
+        var source = Self.visionSource
         if let url = Bundle.main.url(forResource: "FoodClassifier", withExtension: "mlmodelc") {
             do {
                 let configuration = MLModelConfiguration()
@@ -73,9 +142,9 @@ actor OnDeviceFoodClassifier: FoodClassifying {
                 if let json = metadata?["food_label_map"]?.data(using: .utf8) {
                     labelMap = (try? JSONDecoder().decode([String: String].self, from: json)) ?? [:]
                 }
-                source = "Core ML · 기기 내 분석"
+                source = Self.bundledSource
             } catch {
-                source = "모델을 사용할 수 없어 Vision으로 분석"
+                source = Self.bundledFallbackSource
                 let request = VNClassifyImageRequest()
                 try handler.perform([request])
                 observations = request.results ?? []
@@ -86,12 +155,154 @@ actor OnDeviceFoodClassifier: FoodClassifying {
             observations = request.results ?? []
         }
         try Task.checkCancellation()
-        if portionInference == nil { portionInference = try? PhotoPortionInference() }
-        let portion = try? portionInference?.estimate(photo)
+        if includePortion && portionInference == nil { portionInference = try? PhotoPortionInference() }
+        let portion = includePortion ? try? portionInference?.estimate(photo) : nil
         try Task.checkCancellation()
         return ClassificationResult(suggestions: SuggestionResolver.resolve(observations.map {
             ImageLabel(identifier: labelMap[$0.identifier] ?? $0.identifier, confidence: $0.confidence)
         }), source: source, portion: portion)
+    }
+
+    private func cachedIdentityInference(modelURL: URL) throws -> FoodIdentityInference {
+        if let identityInference { return identityInference }
+        let inference = try FoodIdentityInference(modelURL: modelURL)
+        identityInference = inference
+        return inference
+    }
+
+    private func cachedBroadIdentityInference(modelURL: URL) throws -> FoodIdentityInference {
+        if let broadIdentityInference { return broadIdentityInference }
+        let inference = try FoodIdentityInference(modelURL: modelURL)
+        broadIdentityInference = inference
+        return inference
+    }
+}
+
+enum BroadFoodReconciler {
+    private static let deployable = Set(["hamburger", "pancake", "pasta", "pizza", "salad", "sandwich", "sushi"])
+    private static let minimumConfidence: Float = 0.82
+
+    static func reconcile(detailed: [ImageLabel], broad: [ImageLabel]) -> [ImageLabel] {
+        guard let candidate = broad.first,
+              candidate.confidence >= minimumConfidence,
+              deployable.contains(FoodLabelFormatter.canonicalName(candidate.identifier)) else { return detailed }
+        let broadName = FoodLabelFormatter.canonicalName(candidate.identifier)
+        guard detailed.first.map({ FoodLabelFormatter.canonicalName($0.identifier) }) != broadName else { return detailed }
+        return [candidate] + detailed.filter { FoodLabelFormatter.canonicalName($0.identifier) != broadName }
+    }
+}
+
+struct ClassifiedFoodRegion: Sendable {
+    /// Vision normalized coordinates, origin at bottom left.
+    let box: CGRect
+    let label: String?
+}
+
+struct FoodRegion: Sendable {
+    let box: CGRect
+    let confidence: Float
+}
+
+final class FoodRegionDetector {
+    private static let minConfidence: Float = 0.4
+    private static let minArea = 0.015
+    private static let overlapThreshold = 0.5
+    private static let maxRegions = 8
+    private static let unitBox = CGRect(x: 0, y: 0, width: 1, height: 1)
+
+    private let model: VNCoreMLModel
+
+    init(modelURL: URL) throws {
+        let configuration = MLModelConfiguration()
+        configuration.computeUnits = .all
+        model = try VNCoreMLModel(for: MLModel(contentsOf: modelURL, configuration: configuration))
+    }
+
+    func detect(_ photo: Data) throws -> [FoodRegion] {
+        let request = VNCoreMLRequest(model: model)
+        request.imageCropAndScaleOption = .scaleFill
+        try VNImageRequestHandler(data: photo).perform([request])
+        guard let objects = request.results as? [VNRecognizedObjectObservation] else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        return Self.suppressOverlaps(objects.compactMap { object in
+            guard let food = object.labels.first, food.identifier == "food" else { return nil }
+            return FoodRegion(box: object.boundingBox, confidence: food.confidence)
+        })
+    }
+
+    static func suppressOverlaps(_ candidates: [FoodRegion]) -> [FoodRegion] {
+        var kept: [FoodRegion] = []
+        for candidate in candidates.sorted(by: { $0.confidence > $1.confidence }) {
+            let raw = candidate.box
+            guard [raw.origin.x, raw.origin.y, raw.width, raw.height].allSatisfy(\.isFinite),
+                  raw.width > 0, raw.height > 0, candidate.confidence.isFinite,
+                  candidate.confidence >= Self.minConfidence else { continue }
+            let box = raw.intersection(Self.unitBox)
+            guard !box.isNull, box.area >= Self.minArea else { continue }
+            let overlaps = kept.contains { other in
+                let intersection = box.intersection(other.box)
+                let intersectionArea = intersection.isNull ? 0 : intersection.area
+                let smallerArea = min(box.area, other.box.area)
+                return intersectionArea / smallerArea > Self.overlapThreshold
+            }
+            if !overlaps { kept.append(FoodRegion(box: box, confidence: candidate.confidence)) }
+            if kept.count == Self.maxRegions { break }
+        }
+        return kept.sorted { $0.box.midY == $1.box.midY ? $0.box.midX < $1.box.midX : $0.box.midY > $1.box.midY }
+    }
+
+    static func crop(_ photo: Data, box: CGRect) throws -> Data {
+        guard let source = CGImageSourceCreateWithData(photo as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw CocoaError(.fileReadCorruptFile) }
+        // The caller supplies PhotoPreparation's orientation-normalized JPEG.
+        let rect = CGRect(x: box.minX * Double(image.width), y: (1 - box.maxY) * Double(image.height),
+                          width: box.width * Double(image.width), height: box.height * Double(image.height)).integral
+        guard let cropped = image.cropping(to: rect) else { throw CocoaError(.fileReadCorruptFile) }
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        CGImageDestinationAddImage(destination, cropped, nil)
+        guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
+        return data as Data
+    }
+}
+
+private extension CGRect {
+    var area: Double { Double(width * height) }
+}
+
+enum RegionPortionAllocator {
+    static func items(regions: [ClassifiedFoodRegion], wholePlate: PhotoPortionEstimate?) -> [MealItem] {
+        let areas = regions.map { max(0, $0.box.width * $0.box.height) }
+        let totalArea = areas.reduce(0, +)
+        var items = zip(regions, areas).map { region, area in
+            var item = PhotoCalorieEstimator.estimate(label: region.label)
+            if let wholePlate, wholePlate.isValid, totalArea.isFinite, totalArea > 0, area > 0 {
+                // This is an area allocation, not a crop weight measurement.
+                // Never apply a whole-plate regression independently per crop.
+                item.grams = wholePlate.grams * area / totalArea
+                item.estimateSource = "전체 추정 중량을 음식 영역 비율로 배분 · 추정"
+            } else {
+                item.estimateSource = "음식 영역 인식 · 대표량 추정"
+            }
+            return item
+        }
+        // Preserve the whole-photo energy estimate. Food identity determines
+        // each item's relative energy share; the calorie model determines the
+        // total, so multi-food analysis doesn't silently discard its output.
+        if let wholePlate, wholePlate.isValid {
+            let representativeTotal = items.reduce(0) { $0 + $1.calories }
+            if representativeTotal.isFinite, representativeTotal > 0 {
+                let scale = wholePlate.calories / representativeTotal
+                for index in items.indices {
+                    items[index].calories *= scale
+                    items[index].estimateSource = "사진 전체 추정치를 음식 영역별로 배분 · 추정"
+                }
+            }
+        }
+        return items
     }
 }
 
@@ -102,7 +313,8 @@ final class FoodIdentityInference {
     var labels: [String] { Array(mapping.values) }
 
     init(modelURL: URL) throws {
-        let configuration = MLModelConfiguration(); configuration.computeUnits = .all
+        let configuration = MLModelConfiguration()
+        configuration.computeUnits = .all
         model = try MLModel(contentsOf: modelURL, configuration: configuration)
         guard let metadata = model.modelDescription.metadata[.creatorDefinedKey] as? [String: String],
               let json = metadata["food_label_map"]?.data(using: .utf8),
@@ -123,24 +335,27 @@ final class FoodIdentityInference {
     }
 }
 
-struct ImageLabel {
+struct ImageLabel: Sendable {
     let identifier: String
     let confidence: Float
 }
 
 enum SuggestionResolver {
+    private static let minimumConfidence: Float = 0.1
+    private static let maximumSuggestions = 5
     private static let genericLabels: Set<String> = ["food", "foods", "dish", "meal", "plate", "menu", "container"]
+    private static let soupChoiceLabels: Set<String> = ["soup", "soups", "stew"]
 
     static func resolve(_ labels: [ImageLabel]) -> [FoodSuggestion] {
         var seen = Set<String>()
         return Array(labels.sorted { $0.confidence > $1.confidence }.compactMap { label -> FoodSuggestion? in
-            guard label.confidence.isFinite, label.confidence >= 0.1 else { return nil }
+            guard label.confidence.isFinite, label.confidence >= minimumConfidence else { return nil }
             let normalized = label.identifier.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             guard !normalized.isEmpty, !genericLabels.contains(normalized) else { return nil }
             // A broad soup observation is a choice of recipes, never a specific dish prediction.
-            if ["soup", "soups", "stew"].contains(normalized) {
-                guard seen.insert("soup_choices").inserted else { return nil }
-                return FoodSuggestion(id: "soup_choices", label: "국·수프 후보 · 종류를 골라주세요", confidence: label.confidence, rawLabel: label.identifier)
+            if soupChoiceLabels.contains(normalized) {
+                guard seen.insert(FoodSuggestion.soupChoicesID).inserted else { return nil }
+                return FoodSuggestion(id: FoodSuggestion.soupChoicesID, label: "국·수프 후보 · 종류를 골라주세요", confidence: label.confidence, rawLabel: label.identifier)
             }
             if let food = FoodCatalog.match(label.identifier) {
                 guard seen.insert(food.id).inserted else { return nil }
@@ -149,7 +364,7 @@ enum SuggestionResolver {
             let key = "model:" + normalized.replacingOccurrences(of: " ", with: "_")
             guard seen.insert(key).inserted else { return nil }
             return FoodSuggestion(id: key, label: "모델 후보 · \(FoodLabelFormatter.displayName(label.identifier))", confidence: label.confidence, rawLabel: label.identifier)
-        }.prefix(5))
+        }.prefix(maximumSuggestions))
     }
 }
 
@@ -209,7 +424,8 @@ enum FoodLabelFormatter {
         "tteokbokki": "떡볶이", "soup": "국·수프", "stew": "찌개", "rice": "밥", "chicken": "닭고기",
         "egg": "달걀", "banana": "바나나", "apple": "사과", "bread": "빵", "salmon": "연어",
         "broccoli": "브로콜리", "tofu": "두부", "potato": "감자",
-        "salad": "샐러드", "fried_foods": "튀김류", "tempura": "튀김류"
+        "salad": "샐러드", "fried_foods": "튀김류", "tempura": "튀김류", "gyukatsu": "규카츠", "gyu_katsu": "규카츠",
+        "pancake": "팬케이크", "pasta": "파스타", "sandwich": "샌드위치"
     ]
 
     static func displayName(_ identifier: String) -> String {
@@ -231,6 +447,9 @@ enum FoodLabelFormatter {
 }
 
 enum PhotoPreparation {
+    private static let maxPixelSize = 1600
+    private static let compressionQuality = 0.8
+
     // Downsample and apply EXIF orientation without decoding a full-resolution image.
     // Re-encoding excludes original location metadata.
     static func prepare(_ data: Data) throws -> Data {
@@ -238,13 +457,13 @@ enum PhotoPreparation {
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 1600
+                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
               ] as CFDictionary) else { throw CocoaError(.fileReadCorruptFile) }
         let output = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(output, UTType.jpeg.identifier as CFString, 1, nil) else {
             throw CocoaError(.fileWriteUnknown)
         }
-        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary)
+        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: compressionQuality] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
         return output as Data
     }

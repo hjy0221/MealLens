@@ -3,7 +3,14 @@ import HealthKit
 import Observation
 
 @MainActor @Observable final class HealthService {
+    private static let readableTypes: Set<HKObjectType> = [
+        HKQuantityType(.stepCount),
+        HKQuantityType(.activeEnergyBurned),
+        HKQuantityType(.bodyMass)
+    ]
+
     private let store = HKHealthStore()
+
     var steps: Double?
     var activeEnergy: Double?
     var weight: Double?
@@ -16,19 +23,23 @@ import Observation
     func connect(on date: Date) async {
         guard HKHealthStore.isHealthDataAvailable() else { status = "이 기기에서는 건강 데이터를 사용할 수 없어요."; return }
         do {
-            let types: Set<HKObjectType> = [HKQuantityType(.stepCount), HKQuantityType(.activeEnergyBurned), HKQuantityType(.bodyMass)]
-            try await store.requestAuthorization(toShare: [], read: types)
+            try await store.requestAuthorization(toShare: [], read: Self.readableTypes)
             connected = true
             await refresh(on: date)
         } catch { status = "건강 앱 연결을 완료하지 못했어요. 다시 시도해 주세요." }
     }
+
     func refresh(on date: Date) async {
         guard connected else { return }
         let token = UUID(); requestID = token
         loading = true
         steps = nil; activeEnergy = nil; weight = nil; weightDate = nil
         let start = Calendar.current.startOfDay(for: date)
-        let end = Calendar.current.date(byAdding: .day, value: 1, to: start)!
+        guard let end = Calendar.current.date(byAdding: .day, value: 1, to: start) else {
+            status = "선택한 날짜의 건강 데이터를 계산할 수 없어요."
+            loading = false
+            return
+        }
         do {
             async let stepValue = sum(.stepCount, unit: .count(), start: start, end: end)
             async let energyValue = sum(.activeEnergyBurned, unit: .kilocalorie(), start: start, end: end)
@@ -43,6 +54,7 @@ import Observation
         }
         if requestID == token { loading = false }
     }
+
     private func sum(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, start: Date, end: Date) async throws -> Double? {
         try await withCheckedThrowingContinuation { continuation in
             let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
@@ -53,6 +65,7 @@ import Observation
             store.execute(query)
         }
     }
+
     private func latestWeight(before end: Date) async throws -> (Double, Date)? {
         try await withCheckedThrowingContinuation { continuation in
             let query = HKSampleQuery(sampleType: HKQuantityType(.bodyMass), predicate: HKQuery.predicateForSamples(withStart: nil, end: end), limit: 1,

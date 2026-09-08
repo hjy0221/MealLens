@@ -39,9 +39,9 @@
       "download_status": "downloaded_crc_verified_extracted",
       "image_files": 31395,
       "unique_filenames": 28897,
-      "training_status": "not_yet_trained",
+      "training_status": "local_class_agnostic_detector_trained_and_heldout_evaluated",
       "rights_status": "noncommercial_research_only",
-      "notes": "256 bounding-box files retained. Mixed-food photos repeat across categories; split by original image group before cropping. No UEC-trained model is bundled."
+      "notes": "256 bounding-box files retained. Exact image bytes are grouped before splitting because filenames are not globally unique. The local UEC-trained detector is git-ignored and must not be publicly distributed under these terms."
     },
     {
       "id": "nutrition5k",

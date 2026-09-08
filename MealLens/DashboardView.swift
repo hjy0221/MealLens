@@ -5,12 +5,17 @@ struct DashboardView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var phase
     @Query(sort: \Meal.date, order: .reverse) private var meals: [Meal]
+
     @State private var day = Date()
     @State private var showEditor = false
     @State private var health = HealthService()
     @State private var error: String?
+
     private var todaysMeals: [Meal] { DailySummary.meals(meals, on: day) }
     private var total: Nutrients { DailySummary.total(todaysMeals) }
+    private var alertIsPresented: Binding<Bool> {
+        Binding(get: { error != nil }, set: { if !$0 { error = nil } })
+    }
 
     var body: some View {
         NavigationStack {
@@ -36,7 +41,7 @@ struct DashboardView: View {
                             HStack(spacing: 12) {
                                 Image(systemName: "fork.knife.circle.fill").font(.title).foregroundStyle(.teal)
                                 VStack(alignment: .leading) {
-                                    Text(meal.title).font(.headline)
+                                    Text("\(meal.mealTypeName) · \(meal.title)").font(.headline)
                                     Text(meal.date, style: .time).font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
@@ -68,9 +73,10 @@ struct DashboardView: View {
             .onChange(of: phase) { _, value in
                 if value == .active { Task { await health.refresh(on: day) } }
             }
-            .alert("안내", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("확인") { error = nil } } message: { Text(error ?? "") }
+            .alert("안내", isPresented: alertIsPresented) { Button("확인") { error = nil } } message: { Text(error ?? "") }
         }
     }
+
     private func delete(_ offsets: IndexSet) {
         let selected = offsets.map { todaysMeals[$0] }
         for meal in selected { context.delete(meal) }
@@ -80,6 +86,7 @@ struct DashboardView: View {
 
 struct MacroRow: View {
     let nutrients: Nutrients
+
     var body: some View {
         HStack {
             metric("탄수화물", nutrients.carbs)
@@ -89,6 +96,7 @@ struct MacroRow: View {
             metric("지방", nutrients.fat)
         }
     }
+
     private func metric(_ title: String, _ value: Double) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).font(.caption).foregroundStyle(.secondary)
@@ -100,6 +108,7 @@ struct MacroRow: View {
 struct MealDetailView: View {
     let meal: Meal
     @State private var edit = false
+
     var body: some View {
         List {
             if let data = meal.photo, let image = UIImage(data: data) {
@@ -107,6 +116,7 @@ struct MealDetailView: View {
             }
             Section {
                 Text(meal.date, format: .dateTime.month().day().hour().minute())
+                Text(meal.mealTypeName).font(.headline).foregroundStyle(.teal)
                 Text("\(meal.total.calories, specifier: "%.0f") kcal · 추정").font(.title2.bold())
                 MacroRow(nutrients: meal.total)
             }

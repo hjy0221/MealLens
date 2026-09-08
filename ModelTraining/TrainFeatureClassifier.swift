@@ -12,7 +12,10 @@ import TabularData
     struct Sample { let record: Record; let features: [Float] }
     static func main() throws {
         let args = CommandLine.arguments
-        guard args.count == 3 else { fatalError("TrainFeatureClassifier <prepared-dataset> <new-output>") }
+        guard args.count == 3 || (args.count == 4 && args[3] == "--openimages-broad") else {
+            fatalError("TrainFeatureClassifier <prepared-dataset> <new-output> [--openimages-broad]")
+        }
+        let broad = args.count == 4
         let root = URL(fileURLWithPath: args[1]), output = URL(fileURLWithPath: args[2])
         guard !FileManager.default.fileExists(atPath: output.path) else { fatalError("Output already exists") }
         let manifestData = try Data(contentsOf: root.appendingPathComponent("manifest.json"))
@@ -55,10 +58,13 @@ import TabularData
             maxIterations: 50, l2Penalty: 0.01, convergenceThreshold: 0.001, featureRescaling: true)
         let classifier = try MLLogisticRegressionClassifier(trainingData: table(train), targetColumn: "food", featureColumns: columns, parameters: parameters)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        let url = output.appendingPathComponent("FoodIdentity.mlmodel")
-        try classifier.write(to: url, metadata: MLModelMetadata(author: "MealLens; AI Hub Korean Food and Food-101",
-            shortDescription: "251-class experimental food classifier from Vision revision 2 features, including tteokbokki.", version: "0.3",
-            additional: ["food_label_map": String(data: mappingData, encoding: .utf8)!, "feature_count": "768", "vision_revision": "2", "crop": "centerCrop", "preprocessing": "PhotoPreparation.prepare", "training_dataset": "AI Hub Korean Food 150 + Food-101 101"]))
+        let url = output.appendingPathComponent(broad ? "FoodBroadIdentity.mlmodel" : "FoodIdentity.mlmodel")
+        let author = broad ? "MealLens; Open Images contributors and Google" : "MealLens; AI Hub Korean Food and Food-101"
+        let description = broad ? "Broad food-family classifier trained on attribution-verified CC BY Open Images crops." : "251-class experimental food classifier from Vision revision 2 features, including tteokbokki."
+        let dataset = broad ? "Open Images food bounding-box crops; images CC BY 2.0, annotations CC BY 4.0" : "AI Hub Korean Food 150 + Food-101 101"
+        try classifier.write(to: url, metadata: MLModelMetadata(author: author,
+            shortDescription: description, version: broad ? "0.1" : "0.3",
+            additional: ["food_label_map": String(data: mappingData, encoding: .utf8)!, "feature_count": "768", "vision_revision": "2", "crop": "centerCrop", "preprocessing": "PhotoPreparation.prepare", "training_dataset": dataset]))
         let model = try MLModel(contentsOf: MLModel.compileModel(at: url))
         let probabilityName = model.modelDescription.predictedProbabilitiesName!
         var predictions: [[String: Any]] = []

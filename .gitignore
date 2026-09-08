@@ -4,3 +4,5 @@ work/
 xcuserdata/
 .DS_Store
 __pycache__/
+# UEC FOOD-256-derived detector is noncommercial-research-only.
+MealLens/FoodDetector.mlmodel

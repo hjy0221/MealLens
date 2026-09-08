@@ -5,6 +5,63 @@ import CoreML
 @testable import MealLens
 
 final class MealLensTests: XCTestCase {
+    func testBroadClassifierOnlyOverridesWithStrongSpecificEvidence() {
+        let detailed = [ImageLabel(identifier: "food101__bibimbap", confidence: 0.72)]
+        XCTAssertEqual(BroadFoodReconciler.reconcile(detailed: detailed,
+            broad: [ImageLabel(identifier: "openimages__pizza", confidence: 0.9)]).first?.identifier,
+            "openimages__pizza")
+        XCTAssertEqual(BroadFoodReconciler.reconcile(detailed: detailed,
+            broad: [ImageLabel(identifier: "openimages__pizza", confidence: 0.7)]).first?.identifier,
+            "food101__bibimbap")
+    }
+
+    func testGyukatsuIsAvailableAsAnExplicitFoodChoice() {
+        let food = FoodCatalog.match("gyukatsu")
+        XCTAssertEqual(food?.name, "규카츠")
+        XCTAssertEqual(FoodLabelFormatter.displayName("gyukatsu"), "규카츠")
+    }
+
+    func testRegionAllocationPreservesWholePlateMassWithoutDuplicatingCalories() {
+        let regions = [ClassifiedFoodRegion(box: CGRect(x: 0, y: 0, width: 0.4, height: 0.5), label: "rice"),
+                       ClassifiedFoodRegion(box: CGRect(x: 0.5, y: 0, width: 0.2, height: 0.5), label: "pizza")]
+        let items = RegionPortionAllocator.items(regions: regions, wholePlate: .init(grams: 450, calories: 700))
+        XCTAssertEqual(items.count, 2)
+        XCTAssertEqual(items[0].grams, 300, accuracy: 0.001)
+        XCTAssertEqual(items[1].grams, 150, accuracy: 0.001)
+        XCTAssertEqual(items.reduce(0) { $0 + $1.grams }, 450, accuracy: 0.001)
+        XCTAssertEqual(items.reduce(0) { $0 + $1.calories }, 700, accuracy: 0.001)
+        XCTAssertTrue(items.allSatisfy(\.isValid))
+        XCTAssertGreaterThan(items[1].calories, items[0].calories)
+    }
+
+    func testRegionSuppressionRemovesDuplicatesButRetainsSeparateSameFoods() {
+        let boxes = [FoodRegion(box: CGRect(x: 0, y: 0, width: 0.4, height: 0.4), confidence: 0.9),
+                     FoodRegion(box: CGRect(x: 0.01, y: 0.01, width: 0.4, height: 0.4), confidence: 0.8),
+                     FoodRegion(box: CGRect(x: 0.6, y: 0, width: 0.4, height: 0.4), confidence: 0.8),
+                     FoodRegion(box: CGRect(x: 0, y: 0.7, width: 0.2, height: 0.2), confidence: 0.1)]
+        XCTAssertEqual(FoodRegionDetector.suppressOverlaps(boxes).count, 2)
+    }
+
+    func testRegionCropFlipsVisionVerticalCoordinates() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 100, height: 100), format: format).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 100, height: 50))
+            UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 50, width: 100, height: 50))
+        }
+        let cropped = try FoodRegionDetector.crop(XCTUnwrap(image.jpegData(compressionQuality: 1)),
+                                                  box: CGRect(x: 0, y: 0.5, width: 1, height: 0.5))
+        let result = try XCTUnwrap(UIImage(data: cropped)?.cgImage)
+        XCTAssertEqual(result.width, 100)
+        XCTAssertEqual(result.height, 50)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8,
+            bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(result, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        XCTAssertGreaterThan(pixel[0], 200)
+        XCTAssertLessThan(pixel[2], 50)
+    }
+
     func testNewClassifierCoversKoreanFoodsAndValidatesFeatureShape() throws {
         let url = try XCTUnwrap(Bundle.main.url(forResource: "FoodIdentity", withExtension: "mlmodelc"))
         let model = try FoodIdentityInference(modelURL: url)

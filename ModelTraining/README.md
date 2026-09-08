@@ -61,3 +61,28 @@ python3 -m unittest discover -s ModelTraining -p 'test_*.py'
 ```
 
 모든 원본·중간 데이터·전체 평가 결과는 git에서 제외되는 `work/`에 보관합니다. 음식 인식 성능, 중량 오차, 열량 오차는 서로 다른 지표입니다.
+
+## 여러 음식 영역 탐지 실험
+
+UEC FOOD-256의 `bb_info.txt`를 합쳐 음식 영역 한 종류(`food`)를 학습합니다. 이름 분류는 기존 FoodIdentity가 맡습니다. **서로 다른 사진도 파일 번호가 같을 수 있으므로 번호로 합치지 않습니다.** 파일 SHA-256이 같은 사진의 상자만 합친 뒤 학습/검증/시험을 80/10/10 비율로 나눕니다. 비슷하지만 파일이 다른 연속 사진까지 제거한 분할은 아닙니다.
+
+```sh
+python3 ModelTraining/prepare_detection.py \
+  work/global-datasets/uecfood256/extracted/UECFOOD256 work/detection-uec-full
+python3 ModelTraining/prepare_multifood_focus.py work/detection-uec-full work/detection-uec-focused
+xcrun swiftc ModelTraining/TrainFoodDetector.swift -o work/train-food-detector
+work/train-food-detector work/detection-uec-focused work/runs/new-food-detector 1000 --export-only
+xcrun swiftc -O MealLens/FoodClassifier.swift MealLens/Nutrition.swift \
+  MealLens/PhotoPortionInference.swift ModelTraining/EvaluateFoodDetector.swift \
+  -o work/evaluate-food-detector
+work/evaluate-food-detector work/runs/new-food-detector/FoodDetector.mlmodel \
+  work/detection-uec-full/test work/runs/new-food-detector/app-evaluation.json
+```
+
+Python에는 Pillow가 필요합니다. `--limit 3000`은 해시 순서로 정한 파일럿 표본이며, 전체 실행과 같은 분할 규칙을 사용합니다. `prepare_multifood_focus.py`는 학습의 모든 다중 음식 사진과 단일 음식 1,800장을 사용하며, 검증은 모든 다중 음식 사진과 단일 음식 200장을 사용합니다. 시험 분할은 바꾸지 않습니다. Create ML의 ObjectPrint 전이 학습을 사용합니다. `--export-only` 실행 후 별도 평가를 반드시 실행합니다. 시험 평가는 Core ML 모델을 실제 Vision 경로로 불러와 신뢰도 0.4, IoU 0.5에서 음식 영역 정밀도·재현율을 계산하고, 여러 음식 사진의 결과도 별도로 기록합니다. Vision saliency를 동일 사진에서 비교하지만, saliency는 음식 전용 탐지가 아닙니다.
+
+앱의 `OnDeviceFoodClassifier(detectorURL:)`에 컴파일된 모델을 전달해 로컬 통합 검사가 가능합니다. 배포가 승인된 모델을 Xcode 타깃 리소스에 `FoodDetector.mlmodel`로 추가하면 기본 초기화에서도 사용합니다. 탐지 모델이 없거나 실패하면 기존 사진 전체 분석을 유지합니다. **UEC 데이터는 비상업적 연구용이므로 이번 연구 모델은 `work/`에만 저장하며 공개 앱 리소스에 포함하지 않습니다.** [원본 조건](https://foodcam.mobi/dataset256.html)
+
+2026-09-08의 정리된 v4 연구 실행은 시험 3,024장에서 음식 영역 재현율 94.1%, 정밀도 84.6%를 기록했습니다. 여러 음식 사진 125장에서는 재현율 77.0%, 정밀도 77.2%, 모든 표시 음식을 찾은 사진 72장을 기록했습니다. 동일 시험에서 Vision objectness saliency는 각각 19.3%, 37.3%, 10장이었습니다. IoU 0.5, 탐지 신뢰도 0.4 기준입니다. 이 평가는 UEC 사진의 **음식 위치만** 측정하며 음식 이름·중량·열량 정확도를 뜻하지 않습니다. 로컬 Xcode 빌드는 git에서 제외된 `MealLens/FoodDetector.mlmodel`을 사용할 수 있습니다.
+
+영역별 중량은 기존 접시 전체 중량 예측을 상자 면적 비율로 배분하는 휴리스틱입니다. 잘라낸 이미지마다 접시 중량 모델을 반복 적용하지 않습니다. 칼로리와 영양소는 각 음식의 기본 영양값과 배분 중량으로 계산합니다. 이 데이터에는 음식별 실제 중량이 없으므로 중량 모델을 재학습하거나 중량 정확도 개선을 입증한 결과가 아닙니다. 탐지 누락, 접시/국물의 면적, 겹친 음식, 음식 높이 및 밀도는 오차 요인입니다.

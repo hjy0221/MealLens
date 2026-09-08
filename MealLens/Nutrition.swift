@@ -6,9 +6,11 @@ struct Nutrients: Codable, Equatable {
     var protein = 0.0
     var carbs = 0.0
     var fat = 0.0
+
     func scaled(by factor: Double) -> Self {
         .init(calories: calories * factor, protein: protein * factor, carbs: carbs * factor, fat: fat * factor)
     }
+
     static func + (lhs: Self, rhs: Self) -> Self {
         .init(calories: lhs.calories + rhs.calories, protein: lhs.protein + rhs.protein,
               carbs: lhs.carbs + rhs.carbs, fat: lhs.fat + rhs.fat)
@@ -25,7 +27,9 @@ struct Food: Identifiable, Codable {
 
 enum FoodCatalog {
     static let soupIDs = ["seaweed_soup", "doenjang_soup", "beef_radish_soup", "kimchi_stew"]
-    static var soups: [Food] { foods.filter { soupIDs.contains($0.id) } }
+    private static let soupIDSet = Set(soupIDs)
+    static var soups: [Food] { foods.filter { soupIDSet.contains($0.id) } }
+
     // Illustrative seed values, not a validated nutrition dataset. Replace before production.
     static let foods: [Food] = [
         Food(id: "rice", name: "쌀밥 · 조리됨", aliases: ["rice", "white rice"], per100g: .init(calories: 130, protein: 2.7, carbs: 28.2, fat: 0.3)),
@@ -38,23 +42,39 @@ enum FoodCatalog {
         Food(id: "bread", name: "식빵", aliases: ["bread", "toast"], per100g: .init(calories: 266, protein: 8.9, carbs: 49.4, fat: 3.3)),
         Food(id: "tofu", name: "두부", aliases: ["tofu"], per100g: .init(calories: 85, protein: 9, carbs: 2, fat: 5)),
         Food(id: "potato", name: "감자 · 삶음", aliases: ["potato"], per100g: .init(calories: 87, protein: 1.9, carbs: 20.1, fat: 0.1)),
+        Food(id: "gyukatsu", name: "규카츠", aliases: ["gyukatsu", "gyu katsu", "규카츠", "규까츠", "beef cutlet"], per100g: .init(calories: 260, protein: 20, carbs: 14, fat: 13)),
         Food(id: "seaweed_soup", name: "미역국", aliases: ["seaweed soup", "miyeok guk", "미역국"], per100g: .init(calories: 25, protein: 1.9, carbs: 1.5, fat: 1.3)),
         Food(id: "doenjang_soup", name: "된장국", aliases: ["doenjang soup", "doenjang guk", "된장국"], per100g: .init(calories: 35, protein: 2.4, carbs: 3.2, fat: 1.4)),
         Food(id: "beef_radish_soup", name: "소고기뭇국", aliases: ["beef radish soup", "소고기뭇국"], per100g: .init(calories: 32, protein: 3, carbs: 1.5, fat: 1.5)),
         Food(id: "kimchi_stew", name: "김치찌개", aliases: ["kimchi stew", "kimchi jjigae", "김치찌개"], per100g: .init(calories: 55, protein: 4, carbs: 3, fat: 3))
     ]
+
     static func match(_ label: String) -> Food? {
         let normalized = FoodLabelFormatter.canonicalName(label)
-        return foods.first {
-            FoodLabelFormatter.canonicalName($0.id) == normalized ||
-            $0.aliases.contains { FoodLabelFormatter.canonicalName($0) == normalized }
-        }
+        return foods.first { $0.matches(normalizedLabel: normalized) }
+    }
+}
+
+private extension Food {
+    func matches(normalizedLabel: String) -> Bool {
+        FoodLabelFormatter.canonicalName(id) == normalizedLabel ||
+        aliases.contains { FoodLabelFormatter.canonicalName($0) == normalizedLabel }
     }
 }
 
 /// Converts food identity into a rough estimate using a representative serving.
 /// This fallback does not infer portion size from image pixels.
 enum PhotoCalorieEstimator {
+    private static let soupServingKeywords = ["soup", "stew", "broth", "ramen", "pho", "chowder"]
+    private static let soupFallbackKeywords = ["soup", "stew", "broth"]
+    private static let handheldKeywords = ["hamburger", "burger", "hot dog", "sandwich", "burrito"]
+    private static let proteinKeywords = ["steak", "beef", "pork", "chicken", "lamb", "salmon", "fish"]
+    private static let sharedPlateKeywords = ["sushi", "dumpling", "taco", "nachos"]
+    private static let produceKeywords = ["salad", "vegetable", "fruit"]
+    private static let starchKeywords = ["rice", "pasta", "spaghetti", "lasagna", "risotto"]
+    private static let dessertKeywords = ["cake", "dessert", "ice cream", "donut", "chocolate", "cookie", "pie"]
+    private static let friedKeywords = ["fried", "fries", "ring", "chips"]
+
     private static let values: [String: Nutrients] = [
         "apple pie": .init(calories: 237, protein: 2, carbs: 34, fat: 11),
         "bibimbap": .init(calories: 140, protein: 6, carbs: 19, fat: 4),
@@ -82,13 +102,7 @@ enum PhotoCalorieEstimator {
 
     static func estimate(label: String?, portion: PhotoPortionEstimate? = nil) -> MealItem {
         var item = representativeEstimate(label: FoodLabelFormatter.photoLabel(label))
-        if let portion, portion.isValid {
-            item.grams = portion.grams
-            item.per100g.calories = portion.calories / portion.grams * 100
-            item.estimateSource = "사진 기반 중량·열량 추정 · 실험"
-        } else {
-            item.estimateSource = "음식별 대표량으로 계산"
-        }
+        apply(portion, to: &item)
         return item
     }
 
@@ -105,42 +119,60 @@ enum PhotoCalorieEstimator {
         return MealItem(name: "\(display) · 사진 기반 추정", grams: grams, per100g: nutrients)
     }
 
+    private static func apply(_ portion: PhotoPortionEstimate?, to item: inout MealItem) {
+        guard let portion, portion.isValid else {
+            item.estimateSource = "음식별 대표량으로 계산"
+            return
+        }
+        item.grams = portion.grams
+        item.per100g.calories = portion.calories / portion.grams * 100
+        item.estimateSource = "사진 기반 중량·열량 추정 · 실험"
+    }
+
     private static func servingGrams(for label: String) -> Double {
-        if ["soup", "stew", "broth", "ramen", "pho", "chowder"].contains(where: { label.contains($0) }) { return 300 }
+        if containsAny(soupServingKeywords, in: label) { return 300 }
         if label.contains("pizza") { return 180 }
-        if ["hamburger", "burger", "hot dog", "sandwich", "burrito"].contains(where: { label.contains($0) }) { return 200 }
-        if ["steak", "beef", "pork", "chicken", "lamb", "salmon", "fish"].contains(where: { label.contains($0) }) { return 180 }
-        if ["sushi", "dumpling", "taco", "nachos"].contains(where: { label.contains($0) }) { return 200 }
-        if ["salad", "vegetable", "fruit"].contains(where: { label.contains($0) }) { return 200 }
-        if ["rice", "pasta", "spaghetti", "lasagna", "risotto"].contains(where: { label.contains($0) }) { return 250 }
-        if ["cake", "dessert", "ice cream", "donut", "chocolate", "cookie", "pie"].contains(where: { label.contains($0) }) { return 120 }
+        if containsAny(handheldKeywords, in: label) { return 200 }
+        if containsAny(proteinKeywords, in: label) { return 180 }
+        if containsAny(sharedPlateKeywords, in: label) { return 200 }
+        if containsAny(produceKeywords, in: label) { return 200 }
+        if containsAny(starchKeywords, in: label) { return 250 }
+        if containsAny(dessertKeywords, in: label) { return 120 }
         return 150
     }
 
     private static func fallback(for label: String) -> Nutrients {
-        if ["soup", "stew", "broth", "salad", "fruit", "vegetable"].contains(where: { label.contains($0) }) {
+        if containsAny(soupFallbackKeywords + produceKeywords, in: label) {
             return .init(calories: 80, protein: 3, carbs: 10, fat: 3)
         }
-        if ["cake", "dessert", "ice cream", "donut", "chocolate", "cookie", "pie"].contains(where: { label.contains($0) }) {
+        if containsAny(dessertKeywords, in: label) {
             return .init(calories: 320, protein: 5, carbs: 42, fat: 15)
         }
-        if ["fried", "fries", "ring", "chips"].contains(where: { label.contains($0) }) {
+        if containsAny(friedKeywords, in: label) {
             return .init(calories: 280, protein: 5, carbs: 30, fat: 15)
         }
-        if ["beef", "pork", "chicken", "lamb", "fish", "salmon", "steak"].contains(where: { label.contains($0) }) {
+        if containsAny(proteinKeywords, in: label) {
             return .init(calories: 220, protein: 23, carbs: 2, fat: 13)
         }
         return .init(calories: 180, protein: 8, carbs: 22, fat: 7)
     }
+
+    private static func containsAny(_ keywords: [String], in label: String) -> Bool {
+        keywords.contains { label.contains($0) }
+    }
 }
 
 struct MealItem: Identifiable, Codable, Equatable {
+    private static let maxGrams = 5000.0
+    private static let maxPer100gNutrient = 1000.0
+
     var id = UUID()
     var name: String
     var grams: Double
     var per100g: Nutrients
     var estimateSource: String? = nil
     var nutrients: Nutrients { per100g.scaled(by: grams / 100) }
+
     var calories: Double {
         get { nutrients.calories }
         set {
@@ -148,23 +180,38 @@ struct MealItem: Identifiable, Codable, Equatable {
             per100g.calories = newValue * 100 / grams
         }
     }
+
     var isValid: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && grams.isFinite && grams > 0 && grams <= 5000 &&
-        [per100g.calories, per100g.protein, per100g.carbs, per100g.fat].allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 1000 }
+        !trimmedName.isEmpty &&
+        grams.isFinite &&
+        grams > 0 &&
+        grams <= Self.maxGrams &&
+        per100g.values.allSatisfy { $0.isFinite && $0 >= 0 && $0 <= Self.maxPer100gNutrient }
     }
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     init(food: Food, grams: Double = 100) { name = food.name; self.grams = grams; per100g = food.per100g }
     init(name: String, grams: Double, per100g: Nutrients) { self.name = name; self.grams = grams; self.per100g = per100g }
+}
+
+private extension Nutrients {
+    var values: [Double] { [calories, protein, carbs, fat] }
 }
 
 @Model final class Meal {
     var id: UUID
     var date: Date
     var title: String
+    var mealType: String?
     var items: [MealItem]
     @Attribute(.externalStorage) var photo: Data?
-    init(date: Date, title: String, items: [MealItem], photo: Data?) {
-        id = UUID(); self.date = date; self.title = title; self.items = items; self.photo = photo
+    init(date: Date, title: String, mealType: String? = nil, items: [MealItem], photo: Data?) {
+        id = UUID(); self.date = date; self.title = title; self.mealType = mealType; self.items = items; self.photo = photo
     }
+    var mealTypeName: String { mealType ?? "식사" }
     var total: Nutrients { items.reduce(Nutrients()) { $0 + $1.nutrients } }
 }
 
@@ -193,9 +240,7 @@ struct MealArchive: Codable {
 
     @MainActor static func restore(_ data: Data, into context: ModelContext) throws -> Int {
         let archive = try JSONDecoder().decode(Self.self, from: data)
-        guard archive.version == 1, Set(archive.entries.map(\.id)).count == archive.entries.count,
-              archive.entries.allSatisfy({ !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-                  $0.date.timeIntervalSince1970.isFinite && !$0.items.isEmpty && $0.items.allSatisfy(\.isValid) }) else {
+        guard archive.isRestorable else {
             throw CocoaError(.fileReadCorruptFile)
         }
         let existing = Set(try context.fetch(FetchDescriptor<Meal>()).map(\.id))
@@ -209,5 +254,20 @@ struct MealArchive: Codable {
             try context.save()
         } catch { context.rollback(); throw error }
         return missing.count
+    }
+
+    private var isRestorable: Bool {
+        version == 1 &&
+        Set(entries.map(\.id)).count == entries.count &&
+        entries.allSatisfy(\.isRestorable)
+    }
+}
+
+private extension MealArchive.Entry {
+    var isRestorable: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        date.timeIntervalSince1970.isFinite &&
+        !items.isEmpty &&
+        items.allSatisfy(\.isValid)
     }
 }
