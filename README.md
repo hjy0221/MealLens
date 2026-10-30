@@ -1,5 +1,55 @@
 # 한 끼 · MealLens
 
+[日本語](https://github.com/hjy0221/MealLens#%E6%97%A5%E6%9C%AC%E8%AA%9E) · [English](https://github.com/hjy0221/MealLens#english) · [한국어](https://github.com/hjy0221/MealLens#%ED%95%9C%EA%B5%AD%EC%96%B4)
+
+## 日本語
+
+MealLens は写真から食品の種類と量を端末内で推定し、カロリーと栄養素を計算する iOS アプリです。SwiftUI、Vision、Core ML、HealthKit、Photos、SwiftData を使用し、写真を外部 AI API に送信しません。
+
+### 使い方
+
+1. ダッシュボードから食事を記録し、撮影または写真を選択します。
+2. Core ML が食品を識別し、画像と食品の種類から量を推定します。
+3. 日本語ではなく韓国語で表示される食品名、重量、合計カロリーを編集できます。重量変更に応じてカロリーも比例して変わります。
+4. 保存するとカロリー、炭水化物、タンパク質、脂質が当日の合計に反映されます。
+
+画像分析モデルが利用できる場合は皿全体の重量とカロリーを推定し、それ以外は食品ごとの代表量を使用します。結果画面に方式を表示します。どちらも推定値で、重量は変更できます。
+
+### 機能と保存
+
+写真の再分析、手動編集、日別集計、食事の修正・削除、HealthKit の歩数・活動エネルギー・体重、SwiftData のローカル保存に対応します。アプリを削除せず更新すると記録は残りますが、削除すると写真と記録も削除されます。
+
+### 構成
+
+`MealLensApp.swift` はアプリと SwiftData、`DashboardView.swift` は集計、`MealEditorView.swift` は分析と保存、`FoodClassifier.swift` は Vision/Core ML 推論、`Nutrition.swift` は食品と栄養の推定を担当します。
+
+## English
+
+MealLens is an iOS app that estimates the type and amount of food in a photo on the device and calculates estimated calories and nutrients. It uses SwiftUI, Vision, Core ML, HealthKit, Photos, and SwiftData; photos are not sent to an external AI API.
+
+### Use
+
+1. Tap the meal-recording action on the dashboard and take a photo or select one from the photo library.
+2. The Core ML model identifies food, and the app estimates the amount from the image and food type.
+3. Food names are displayed in Korean. You can edit the name, weight, and total calories; calories change proportionally when the weight changes.
+4. Save the meal to add its calories, carbohydrates, protein, and fat to today's totals.
+
+When the image-analysis model is available, it estimates weight and calories for the whole plate. Otherwise, representative portions for each food are used as a fallback, and the result screen shows which method was used. Both are estimates, and weight can be edited.
+
+### Features and storage
+
+Features include camera and photo-library input, reanalysis, automatic estimates, manual editing, daily totals and meal details, editing and deletion, HealthKit steps, active energy and recent weight, and local SwiftData storage. The UI is in Korean. Records and photos remain when updating without deleting the app, but deleting the app removes them from the device.
+
+### Project structure
+
+- `MealLens/MealLensApp.swift`: app entry point and SwiftData container.
+- `MealLens/DashboardView.swift`: daily totals and health data.
+- `MealLens/MealEditorView.swift`: photo analysis, estimates, and saving.
+- `MealLens/FoodClassifier.swift`: on-device Vision/Core ML inference.
+- `MealLens/Nutrition.swift`: food catalog and photo-based portion and nutrition estimates.
+
+## 한국어
+
 사진을 찍으면 기기 안에서 음식 종류와 먹은 양을 추정하고, 예상 칼로리와 영양소를 계산하는 iOS 앱입니다. SwiftUI, Vision, Core ML, HealthKit, Photos, SwiftData만 사용하며 외부 AI API로 사진을 보내지 않습니다.
 
 ## 화면 미리보기
@@ -43,30 +93,3 @@
 | `MealLens/MealEditorView.swift` | 사진 분석, 자동 추정, 식사 저장 |
 | `MealLens/FoodClassifier.swift` | Vision/Core ML 온디바이스 추론 |
 | `MealLens/Nutrition.swift` | 음식 카탈로그와 사진 기반 양·영양 추정 |
-
----
-
-## English
-
-MealLens is an iOS app that estimates the type and amount of food in a photo on the device and calculates estimated calories and nutrients. It uses SwiftUI, Vision, Core ML, HealthKit, Photos, and SwiftData; photos are not sent to an external AI API.
-
-### Use
-
-1. Tap the meal-recording action on the dashboard and take a photo or select one from the photo library.
-2. The Core ML model identifies food, and the app estimates the amount from the image and food type.
-3. Food names are displayed in Korean. You can edit the name, weight, and total calories; calories change proportionally when the weight changes.
-4. Save the meal to add its calories, carbohydrates, protein, and fat to today's totals.
-
-When the image-analysis model is available, it estimates weight and calories for the whole plate. Otherwise, representative portions for each food are used as a fallback, and the result screen shows which method was used. Both are estimates, and weight can be edited.
-
-### Features and storage
-
-Features include camera and photo-library input, reanalysis, automatic estimates, manual editing, daily totals and meal details, editing and deletion, HealthKit steps, active energy and recent weight, and local SwiftData storage. The UI is in Korean. Records and photos remain when updating without deleting the app, but deleting the app removes them from the device.
-
-### Project structure
-
-- `MealLens/MealLensApp.swift`: app entry point and SwiftData container.
-- `MealLens/DashboardView.swift`: daily totals and health data.
-- `MealLens/MealEditorView.swift`: photo analysis, estimates, and saving.
-- `MealLens/FoodClassifier.swift`: on-device Vision/Core ML inference.
-- `MealLens/Nutrition.swift`: food catalog and photo-based portion and nutrition estimates.
