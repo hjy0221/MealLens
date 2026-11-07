@@ -10,8 +10,8 @@
 
 <table>
   <tr>
-    <td><img src="Previews/meal-detail-sashimi.png" width="180" alt="魚の食事の詳細"></td>
-    <td><img src="Previews/dashboard.png" width="180" alt="食事履歴ダッシュボード"></td>
+    <td><img src="Previews/meal-detail-sashimi-ja.png" width="180" alt="魚の食事の詳細"></td>
+    <td><img src="Previews/dashboard-ja.png" width="180" alt="食事履歴ダッシュボード"></td>
     <td><img src="Previews/app-icon.png" width="180" alt="アプリのアイコン"></td>
   </tr>
 </table>
@@ -56,8 +56,8 @@ This is an iOS app that takes a photo and estimates the type of food and the amo
 
 <table>
   <tr>
-    <td><img src="Previews/meal-detail-sashimi.png" width="180" alt="Sashimi meal details"></td>
-    <td><img src="Previews/dashboard.png" width="180" alt="Meal Record Dashboard"></td>
+    <td><img src="Previews/meal-detail-sashimi-en.png" width="180" alt="Sashimi meal details"></td>
+    <td><img src="Previews/dashboard-en.png" width="180" alt="Meal Record Dashboard"></td>
     <td><img src="Previews/app-icon.png" width="180" alt="App icon"></td>
   </tr>
 </table>
