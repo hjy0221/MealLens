@@ -6,6 +6,16 @@
 
 MealLens は写真から食品の種類と量を端末内で推定し、カロリーと栄養素を計算する iOS アプリです。SwiftUI、Vision、Core ML、HealthKit、Photos、SwiftData を使用し、写真を外部 AI API に送信しません。
 
+### 画面プレビュー
+
+<table>
+  <tr>
+    <td><img src="Previews/meal-detail-sashimi.png" width="180" alt="刺身の食事詳細"></td>
+    <td><img src="Previews/dashboard.png" width="180" alt="食事記録ダッシュボード"></td>
+    <td><img src="Previews/app-icon.png" width="180" alt="アプリアイコン"></td>
+  </tr>
+</table>
+
 ### 使い方
 
 1. ダッシュボードから食事を記録し、撮影または写真を選択します。
@@ -26,6 +36,16 @@ MealLens は写真から食品の種類と量を端末内で推定し、カロ�
 ## English
 
 MealLens is an iOS app that estimates the type and amount of food in a photo on the device and calculates estimated calories and nutrients. It uses SwiftUI, Vision, Core ML, HealthKit, Photos, and SwiftData; photos are not sent to an external AI API.
+
+### Screenshots
+
+<table>
+  <tr>
+    <td><img src="Previews/meal-detail-sashimi.png" width="180" alt="Sashimi meal detail"></td>
+    <td><img src="Previews/dashboard.png" width="180" alt="Meal dashboard"></td>
+    <td><img src="Previews/app-icon.png" width="180" alt="App icon"></td>
+  </tr>
+</table>
 
 ### Use
 
