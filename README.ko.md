@@ -1,0 +1,47 @@
+# 한 끼 · MealLens
+
+[日本語](README.ja.md) · [English](README.md) · [한국어](README.ko.md)
+
+사진을 찍으면 기기 안에서 음식 종류와 먹은 양을 추정하고, 예상 칼로리와 영양소를 계산하는 iOS 앱입니다. SwiftUI, Vision, Core ML, HealthKit, Photos, SwiftData만 사용하며 외부 AI API로 사진을 보내지 않습니다.
+
+## 화면 미리보기
+
+<table>
+  <tr>
+    <td><img src="Previews/meal-detail-sashimi.png" width="180" alt="생선회 식사 상세"></td>
+    <td><img src="Previews/dashboard.png" width="180" alt="식사 기록 대시보드"></td>
+    <td><img src="Previews/app-icon.png" width="180" alt="앱 아이콘"></td>
+  </tr>
+</table>
+
+## 사용 방법
+
+1. 대시보드에서 **식사 기록하기**를 누릅니다.
+2. 사진을 찍거나 사진 보관함에서 음식 사진을 고릅니다.
+3. Core ML 모델이 음식 종류를 찾고, 앱이 사진과 음식 종류를 바탕으로 먹은 양을 추정합니다.
+4. 음식 이름은 한글로 표시됩니다. 음식 이름·중량·먹은 양 전체의 칼로리를 직접 수정할 수 있습니다. 중량을 바꾸면 칼로리도 비례해서 바뀝니다.
+5. 저장하면 오늘의 칼로리와 탄수화물·단백질·지방 합계에 반영됩니다.
+
+사진 분석 모델이 실행되면 사진에서 접시 전체의 중량·열량을 추정합니다. 모델을 사용할 수 없는 경우에만 음식별 대표량을 fallback으로 적용하며, 결과 화면에 적용한 방식을 표시합니다. 두 방식 모두 추정값이므로 사용자가 중량을 수정할 수 있습니다.
+
+## 주요 기능
+
+- 사진 선택·카메라 촬영·사진 다시 분석
+- 사진 기반 음식명·중량·칼로리 자동 추정
+- 음식과 중량을 직접 수정할 수 있는 편집 화면
+- 하루별 식사 합계와 식사 상세·수정·삭제
+- HealthKit 걸음 수·활동 에너지·최근 체중 읽기
+- SwiftData 로컬 저장
+- 한국어 네이티브 UI와 앱 아이콘
+
+앱을 삭제하지 않고 업데이트하면 기존 기록과 사진이 유지됩니다. 기록과 사진은 기기에 저장되며 앱을 삭제하면 함께 삭제됩니다.
+
+## 프로젝트 구조
+
+| 파일 | 역할 |
+| --- | --- |
+| `MealLens/MealLensApp.swift` | 앱 시작과 SwiftData 컨테이너 |
+| `MealLens/DashboardView.swift` | 오늘의 합계와 건강 데이터 |
+| `MealLens/MealEditorView.swift` | 사진 분석, 자동 추정, 식사 저장 |
+| `MealLens/FoodClassifier.swift` | Vision/Core ML 온디바이스 추론 |
+| `MealLens/Nutrition.swift` | 음식 카탈로그와 사진 기반 양·영양 추정 |
