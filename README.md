@@ -4,6 +4,8 @@
 
 ## 日本語
 
+[日本語](https://github.com/hjy0221/MealLens#%E6%97%A5%E6%9C%AC%E8%AA%9E) · [English](https://github.com/hjy0221/MealLens#english) · [한국어](https://github.com/hjy0221/MealLens#%ED%95%9C%EA%B5%AD%EC%96%B4)
+
 写真を撮ると、デバイス内で食べ物の種類と食べた量を推定し、推定カロリーと栄養素を計算するiOSアプリです。 SwiftUI、Vision、Core ML、HealthKit、Photos、SwiftDataのみを使用し、外部AI APIに写真を送信しません。
 
 ## 画面プレビュー
@@ -50,6 +52,8 @@
 
 ## English
 
+[日本語](https://github.com/hjy0221/MealLens#%E6%97%A5%E6%9C%AC%E8%AA%9E) · [English](https://github.com/hjy0221/MealLens#english) · [한국어](https://github.com/hjy0221/MealLens#%ED%95%9C%EA%B5%AD%EC%96%B4)
+
 This is an iOS app that takes a photo and estimates the type of food and the amount eaten within the device, and calculates estimated calories and nutrients. It only uses SwiftUI, Vision, Core ML, HealthKit, Photos, and SwiftData and does not send photos to external AI APIs.
 
 ## Screen preview
@@ -95,6 +99,8 @@ If you update the app without deleting it, your existing history and photos will
 | `MealLens/Nutrition.swift` | Quantity and nutrition estimation based on food catalogs and photos |
 
 ## 한국어
+
+[日本語](https://github.com/hjy0221/MealLens#%E6%97%A5%E6%9C%AC%E8%AA%9E) · [English](https://github.com/hjy0221/MealLens#english) · [한국어](https://github.com/hjy0221/MealLens#%ED%95%9C%EA%B5%AD%EC%96%B4)
 
 사진을 찍으면 기기 안에서 음식 종류와 먹은 양을 추정하고, 예상 칼로리와 영양소를 계산하는 iOS 앱입니다. SwiftUI, Vision, Core ML, HealthKit, Photos, SwiftData만 사용하며 외부 AI API로 사진을 보내지 않습니다.
 
